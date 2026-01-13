@@ -1,0 +1,1481 @@
+/* ===========================
+   FreshShift - Schichtplaner
+   CSS Styles (Manual Planning Version)
+   =========================== */
+
+:root {
+    /* Colors */
+    --primary-color: #2563eb;
+    --primary-hover: #1d4ed8;
+    --success-color: #16a34a;
+    --success-hover: #15803d;
+    --warning-color: #f59e0b;
+    --danger-color: #dc2626;
+    --fresh-fries-color: #f59e0b;
+    --fresh-fries-bg: #fef3c7;
+    --available-color: #10b981;
+    --available-bg: #d1fae5;
+    
+    /* Grays */
+    --gray-50: #f9fafb;
+    --gray-100: #f3f4f6;
+    --gray-200: #e5e7eb;
+    --gray-300: #d1d5db;
+    --gray-400: #9ca3af;
+    --gray-500: #6b7280;
+    --gray-600: #4b5563;
+    --gray-700: #374151;
+    --gray-800: #1f2937;
+    --gray-900: #111827;
+    
+    /* Spacing */
+    --space-xs: 0.25rem;
+    --space-sm: 0.5rem;
+    --space-md: 1rem;
+    --space-lg: 1.5rem;
+    --space-xl: 2rem;
+    --space-2xl: 3rem;
+    
+    /* Border Radius */
+    --radius-sm: 0.375rem;
+    --radius-md: 0.5rem;
+    --radius-lg: 0.75rem;
+    --radius-xl: 1rem;
+    
+    /* Shadows */
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+}
+
+/* Reset & Base */
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+    min-height: 100vh;
+    color: var(--gray-800);
+    line-height: 1.5;
+}
+
+#app {
+    min-height: 100vh;
+}
+
+/* Screen Management */
+.screen {
+    display: none;
+    min-height: 100vh;
+    background: var(--gray-50);
+}
+
+.screen.active {
+    display: block;
+}
+
+/* ===========================
+   Login Screen
+   =========================== */
+#login-screen {
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+}
+
+.login-container {
+    max-width: 420px;
+    margin: 0 auto;
+    padding: var(--space-xl);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.logo {
+    text-align: center;
+    margin-bottom: var(--space-2xl);
+}
+
+.logo h1 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: white;
+    margin-bottom: var(--space-sm);
+    text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.logo p {
+    color: rgba(255,255,255,0.9);
+    font-size: 1rem;
+}
+
+.login-form {
+    background: white;
+    padding: var(--space-xl);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-lg);
+}
+
+.form-group {
+    margin-bottom: var(--space-md);
+}
+
+.form-group label {
+    display: block;
+    font-weight: 500;
+    margin-bottom: var(--space-xs);
+    color: var(--gray-700);
+    font-size: 0.875rem;
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--gray-300);
+    border-radius: var(--radius-md);
+    font-size: 1rem;
+    font-family: inherit;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.form-row {
+    display: flex;
+    gap: var(--space-md);
+}
+
+.form-row .form-group {
+    flex: 1;
+}
+
+.admin-link {
+    margin-top: var(--space-lg);
+    padding-top: var(--space-lg);
+    border-top: 1px solid var(--gray-200);
+}
+
+/* ===========================
+   Buttons
+   =========================== */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.75rem 1.5rem;
+    font-size: 1rem;
+    font-weight: 500;
+    border: none;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: inherit;
+    text-decoration: none;
+}
+
+.btn-primary {
+    background: var(--primary-color);
+    color: white;
+}
+
+.btn-primary:hover {
+    background: var(--primary-hover);
+}
+
+.btn-secondary {
+    background: var(--gray-100);
+    color: var(--gray-700);
+}
+
+.btn-secondary:hover {
+    background: var(--gray-200);
+}
+
+.btn-success {
+    background: var(--success-color);
+    color: white;
+}
+
+.btn-success:hover:not(:disabled) {
+    background: var(--success-hover);
+}
+
+.btn-success:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.btn-danger {
+    background: var(--danger-color);
+    color: white;
+}
+
+.btn-large {
+    padding: 1rem 2rem;
+    font-size: 1.1rem;
+}
+
+.btn-small {
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+}
+
+.btn-icon {
+    background: none;
+    border: none;
+    padding: var(--space-sm);
+    cursor: pointer;
+    font-size: 1rem;
+    color: var(--gray-600);
+    border-radius: var(--radius-sm);
+    transition: background 0.2s;
+}
+
+.btn-icon:hover {
+    background: var(--gray-100);
+}
+
+.login-form .btn {
+    width: 100%;
+}
+
+/* ===========================
+   App Header
+   =========================== */
+.app-header {
+    background: white;
+    padding: var(--space-md) var(--space-lg);
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    box-shadow: var(--shadow-sm);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+
+.app-header h2 {
+    flex: 1;
+    font-size: 1.25rem;
+    font-weight: 600;
+}
+
+.user-badge {
+    background: var(--fresh-fries-color);
+    color: white;
+    padding: 0.375rem 0.75rem;
+    border-radius: var(--radius-lg);
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.admin-badge {
+    background: var(--gray-800);
+}
+
+/* ===========================
+   Container
+   =========================== */
+.container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: var(--space-lg);
+}
+
+/* ===========================
+   Week Selector
+   =========================== */
+.week-selector {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-md);
+    background: white;
+    padding: var(--space-md);
+    border-radius: var(--radius-lg);
+    margin-bottom: var(--space-lg);
+    box-shadow: var(--shadow-sm);
+}
+
+.week-selector span {
+    font-weight: 600;
+    min-width: 220px;
+    text-align: center;
+}
+
+/* ===========================
+   Admin Layout (Side by Side)
+   =========================== */
+.admin-layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-lg);
+    margin-bottom: var(--space-lg);
+}
+
+.admin-panel {
+    background: white;
+    border-radius: var(--radius-lg);
+    padding: var(--space-lg);
+    box-shadow: var(--shadow-sm);
+}
+
+.admin-panel h3 {
+    margin-bottom: var(--space-md);
+    font-size: 1.1rem;
+    color: var(--gray-700);
+}
+
+.panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--space-md);
+}
+
+.panel-header h3 {
+    margin: 0;
+}
+
+.panel-actions {
+    display: flex;
+    gap: var(--space-sm);
+}
+
+/* ===========================
+   Availability Overview Table
+   =========================== */
+.availability-overview {
+    overflow-x: auto;
+}
+
+.overview-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+
+.overview-table th,
+.overview-table td {
+    border: 1px solid var(--gray-200);
+    padding: 0.5rem;
+    text-align: center;
+}
+
+.overview-table th {
+    background: var(--gray-100);
+    font-weight: 600;
+    font-size: 0.8rem;
+}
+
+.overview-table th.name-header {
+    text-align: left;
+    min-width: 80px;
+}
+
+.overview-table td.name-cell {
+    text-align: left;
+    font-weight: 500;
+    background: var(--gray-50);
+}
+
+.overview-table .available-cell {
+    background: var(--available-bg);
+    color: var(--available-color);
+    font-weight: 500;
+    font-size: 0.75rem;
+}
+
+.overview-table .unavailable-cell {
+    background: var(--gray-50);
+    color: var(--gray-300);
+}
+
+/* ===========================
+   Schedule Editor Table
+   =========================== */
+.schedule-editor {
+    overflow-x: auto;
+}
+
+.schedule-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+
+.schedule-table th,
+.schedule-table td {
+    border: 1px solid var(--gray-300);
+    padding: 0.5rem;
+    text-align: center;
+    min-width: 90px;
+}
+
+.schedule-table th {
+    background: var(--fresh-fries-bg);
+    font-weight: 600;
+}
+
+.schedule-table th .day-name {
+    display: block;
+}
+
+.schedule-table th .date {
+    font-weight: 400;
+    font-size: 0.75rem;
+    color: var(--gray-600);
+}
+
+.schedule-table td.name-cell {
+    text-align: left;
+    font-weight: 600;
+    background: var(--gray-50);
+    min-width: 80px;
+}
+
+.schedule-table td.shift-cell {
+    cursor: pointer;
+    transition: background 0.2s;
+    min-height: 40px;
+    vertical-align: middle;
+}
+
+.schedule-table td.shift-cell:hover {
+    background: var(--fresh-fries-bg);
+}
+
+.schedule-table td.shift-cell.has-shift {
+    background: var(--available-bg);
+}
+
+.schedule-table .shift-time {
+    font-weight: 500;
+    font-size: 0.8rem;
+}
+
+.schedule-table td.closed-cell {
+    background: var(--gray-200);
+    color: var(--gray-400);
+    cursor: not-allowed;
+}
+
+.editor-hint {
+    margin-top: var(--space-md);
+    font-size: 0.8rem;
+    color: var(--gray-500);
+    text-align: center;
+}
+
+/* ===========================
+   Employees Section
+   =========================== */
+.employees-section {
+    background: white;
+    border-radius: var(--radius-lg);
+    padding: var(--space-md) var(--space-lg);
+    box-shadow: var(--shadow-sm);
+}
+
+.employees-section summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--gray-700);
+}
+
+.employees-content {
+    margin-top: var(--space-md);
+    padding-top: var(--space-md);
+    border-top: 1px solid var(--gray-200);
+}
+
+.employees-list-inline {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-md);
+}
+
+.employee-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+    background: var(--gray-100);
+    padding: 0.375rem 0.75rem;
+    border-radius: var(--radius-lg);
+    font-size: 0.875rem;
+}
+
+.employee-tag .type {
+    font-size: 0.7rem;
+    color: var(--gray-500);
+}
+
+.employee-tag .delete-btn {
+    background: none;
+    border: none;
+    color: var(--gray-400);
+    cursor: pointer;
+    padding: 0;
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.employee-tag .delete-btn:hover {
+    color: var(--danger-color);
+}
+
+/* ===========================
+   Availability Form
+   =========================== */
+.days-container {
+    display: grid;
+    gap: var(--space-md);
+}
+
+.day-card {
+    background: white;
+    border-radius: var(--radius-lg);
+    padding: var(--space-lg);
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow 0.2s;
+}
+
+.day-card:hover {
+    box-shadow: var(--shadow-md);
+}
+
+.day-card.unavailable {
+    opacity: 0.6;
+}
+
+.day-card.sunday {
+    border-left: 4px solid var(--warning-color);
+}
+
+.day-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    margin-bottom: var(--space-md);
+    flex-wrap: wrap;
+}
+
+.day-header h3 {
+    flex: 1;
+    font-size: 1.1rem;
+    font-weight: 600;
+    min-width: 120px;
+}
+
+.day-header .date {
+    color: var(--gray-500);
+    font-size: 0.875rem;
+}
+
+.day-header .sunday-note {
+    font-size: 0.75rem;
+    color: var(--warning-color);
+    background: var(--fresh-fries-bg);
+    padding: 0.25rem 0.5rem;
+    border-radius: var(--radius-sm);
+}
+
+.availability-toggle {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.availability-toggle input[type="checkbox"] {
+    width: 1.25rem;
+    height: 1.25rem;
+    accent-color: var(--available-color);
+}
+
+.time-inputs {
+    display: flex;
+    gap: var(--space-md);
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.time-group {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.time-group label {
+    font-size: 0.875rem;
+    color: var(--gray-600);
+}
+
+.time-group input[type="time"] {
+    padding: 0.5rem;
+    border: 1px solid var(--gray-300);
+    border-radius: var(--radius-sm);
+    font-size: 1rem;
+}
+
+.day-notes {
+    margin-top: var(--space-md);
+}
+
+.day-notes input {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--gray-300);
+    border-radius: var(--radius-sm);
+    font-size: 0.875rem;
+}
+
+.notes-group {
+    background: white;
+    padding: var(--space-lg);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+}
+
+.notes-group textarea {
+    min-height: 80px;
+    resize: vertical;
+}
+
+.form-actions {
+    display: flex;
+    gap: var(--space-md);
+    margin-top: var(--space-lg);
+    flex-wrap: wrap;
+}
+
+.form-actions .btn {
+    flex: 1;
+    min-width: 200px;
+}
+
+/* ===========================
+   My Schedule Screen
+   =========================== */
+.schedule-status {
+    background: white;
+    padding: var(--space-lg);
+    border-radius: var(--radius-lg);
+    margin-bottom: var(--space-lg);
+    text-align: center;
+    box-shadow: var(--shadow-sm);
+}
+
+.schedule-status.pending {
+    background: #fffbeb;
+    border: 1px solid #fbbf24;
+}
+
+.schedule-status.released {
+    background: #ecfdf5;
+    border: 1px solid #10b981;
+}
+
+.schedule-status h3 {
+    margin-bottom: var(--space-sm);
+}
+
+.my-schedule-content {
+    display: grid;
+    gap: var(--space-md);
+}
+
+.my-shift-card {
+    background: white;
+    border-radius: var(--radius-lg);
+    padding: var(--space-lg);
+    box-shadow: var(--shadow-sm);
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+}
+
+.my-shift-card.no-shift {
+    opacity: 0.6;
+}
+
+.my-shift-card.closed {
+    background: var(--gray-100);
+}
+
+.shift-day {
+    min-width: 60px;
+    text-align: center;
+}
+
+.shift-day .day-name {
+    font-weight: 600;
+    font-size: 1.1rem;
+}
+
+.shift-day .date {
+    font-size: 0.8rem;
+    color: var(--gray-500);
+}
+
+.shift-details {
+    flex: 1;
+}
+
+.shift-details .shift-time {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--fresh-fries-color);
+}
+
+.shift-details .shift-note {
+    font-size: 0.875rem;
+    color: var(--gray-500);
+}
+
+.weekly-summary {
+    background: white;
+    padding: var(--space-lg);
+    border-radius: var(--radius-lg);
+    margin-top: var(--space-lg);
+    box-shadow: var(--shadow-sm);
+}
+
+.weekly-summary h4 {
+    margin-bottom: var(--space-md);
+}
+
+.summary-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+    gap: var(--space-md);
+}
+
+.stat-item {
+    text-align: center;
+    padding: var(--space-md);
+    background: var(--gray-50);
+    border-radius: var(--radius-md);
+}
+
+.stat-item .stat-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--fresh-fries-color);
+}
+
+.stat-item .stat-label {
+    font-size: 0.8rem;
+    color: var(--gray-500);
+}
+
+/* ===========================
+   Modal
+   =========================== */
+.modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-md);
+}
+
+.modal.active {
+    display: flex;
+}
+
+.modal-content {
+    background: white;
+    border-radius: var(--radius-xl);
+    max-width: 480px;
+    width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: var(--shadow-lg);
+}
+
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-lg);
+    border-bottom: 1px solid var(--gray-200);
+}
+
+.modal-header h3 {
+    margin: 0;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: var(--gray-500);
+    line-height: 1;
+}
+
+.modal-body {
+    padding: var(--space-lg);
+}
+
+.modal-day-info {
+    background: var(--fresh-fries-bg);
+    padding: var(--space-md);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--space-lg);
+    text-align: center;
+    font-weight: 600;
+}
+
+.available-employees h4,
+.manual-entry h4 {
+    font-size: 0.9rem;
+    color: var(--gray-600);
+    margin-bottom: var(--space-sm);
+}
+
+.available-employees {
+    margin-bottom: var(--space-lg);
+}
+
+#available-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+
+.available-employee {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-sm) var(--space-md);
+    background: var(--available-bg);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: transform 0.1s;
+}
+
+.available-employee:hover {
+    transform: scale(1.02);
+}
+
+.available-employee .name {
+    font-weight: 500;
+}
+
+.available-employee .time {
+    font-size: 0.85rem;
+    color: var(--gray-600);
+}
+
+.no-available {
+    color: var(--gray-400);
+    font-style: italic;
+    padding: var(--space-sm);
+}
+
+.manual-entry {
+    padding-top: var(--space-md);
+    border-top: 1px solid var(--gray-200);
+}
+
+.modal-footer {
+    padding: var(--space-lg);
+    border-top: 1px solid var(--gray-200);
+    display: flex;
+    gap: var(--space-md);
+    justify-content: flex-end;
+}
+
+/* ===========================
+   Toast Notifications
+   =========================== */
+#toast-container {
+    position: fixed;
+    bottom: var(--space-lg);
+    right: var(--space-lg);
+    z-index: 1001;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+
+.toast {
+    background: var(--gray-800);
+    color: white;
+    padding: var(--space-md) var(--space-lg);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    animation: slideIn 0.3s ease;
+    max-width: 350px;
+}
+
+.toast.success {
+    background: var(--success-color);
+}
+
+.toast.error {
+    background: var(--danger-color);
+}
+
+.toast.warning {
+    background: var(--warning-color);
+    color: var(--gray-800);
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+/* ===========================
+   Empty States
+   =========================== */
+.empty-state {
+    text-align: center;
+    padding: var(--space-xl);
+    color: var(--gray-500);
+}
+
+/* ===========================
+   Responsive Design
+   =========================== */
+@media (max-width: 1024px) {
+    .admin-layout {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 768px) {
+    .container {
+        padding: var(--space-md);
+    }
+    
+    .app-header {
+        padding: var(--space-sm) var(--space-md);
+    }
+    
+    .app-header h2 {
+        font-size: 1rem;
+    }
+    
+    .time-inputs {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .form-actions {
+        flex-direction: column;
+    }
+    
+    .form-actions .btn {
+        width: 100%;
+    }
+    
+    .my-shift-card {
+        flex-direction: column;
+        text-align: center;
+    }
+    
+    .form-row {
+        flex-direction: column;
+    }
+}
+
+@media (max-width: 480px) {
+    .login-container {
+        padding: var(--space-md);
+    }
+    
+    .logo h1 {
+        font-size: 2rem;
+    }
+    
+    .week-selector {
+        flex-wrap: wrap;
+    }
+    
+    .week-selector span {
+        min-width: auto;
+        order: -1;
+        width: 100%;
+        margin-bottom: var(--space-sm);
+        font-size: 0.9rem;
+    }
+    
+    .panel-header {
+        flex-direction: column;
+        gap: var(--space-sm);
+    }
+    
+    .panel-actions {
+        width: 100%;
+    }
+    
+    .panel-actions .btn {
+        flex: 1;
+    }
+}
+
+/* ===========================
+   Quick Actions
+   =========================== */
+.quick-actions {
+    margin-bottom: var(--space-md);
+}
+
+.btn-warning {
+    background: var(--warning-color);
+    color: var(--gray-800);
+}
+
+.btn-warning:hover {
+    background: #d97706;
+}
+
+.btn-full {
+    width: 100%;
+}
+
+/* ===========================
+   Section Tabs (Employee)
+   =========================== */
+.section-tabs {
+    display: flex;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-lg);
+    background: white;
+    padding: var(--space-sm);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+}
+
+.section-tab {
+    flex: 1;
+    padding: 0.75rem 1rem;
+    border: none;
+    background: transparent;
+    font-family: inherit;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--gray-500);
+    cursor: pointer;
+    border-radius: var(--radius-md);
+    transition: all 0.2s;
+}
+
+.section-tab:hover {
+    background: var(--gray-100);
+}
+
+.section-tab.active {
+    background: var(--fresh-fries-color);
+    color: white;
+}
+
+.section-content {
+    display: none;
+}
+
+.section-content.active {
+    display: block;
+}
+
+/* ===========================
+   Admin Tabs
+   =========================== */
+.admin-tabs {
+    display: flex;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-lg);
+    background: white;
+    padding: var(--space-sm);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+}
+
+.tab-btn {
+    flex: 1;
+    padding: 0.75rem 1rem;
+    border: none;
+    background: transparent;
+    font-family: inherit;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--gray-500);
+    cursor: pointer;
+    border-radius: var(--radius-md);
+    transition: all 0.2s;
+}
+
+.tab-btn:hover {
+    background: var(--gray-100);
+}
+
+.tab-btn.active {
+    background: var(--gray-800);
+    color: white;
+}
+
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+/* ===========================
+   Notification Badge
+   =========================== */
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.notification-badge {
+    position: relative;
+    background: var(--danger-color);
+    color: white;
+    padding: 0.375rem 0.75rem;
+    border-radius: var(--radius-lg);
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+}
+
+.notifications-panel {
+    background: white;
+    border-radius: var(--radius-lg);
+    padding: var(--space-lg);
+    margin-bottom: var(--space-lg);
+    box-shadow: var(--shadow-md);
+    border-left: 4px solid var(--danger-color);
+}
+
+.notifications-panel h4 {
+    margin-bottom: var(--space-md);
+    color: var(--danger-color);
+}
+
+#notifications-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-md);
+}
+
+.notification-item {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-md);
+    padding: var(--space-md);
+    background: #fef2f2;
+    border-radius: var(--radius-md);
+}
+
+.notification-item .notification-icon {
+    font-size: 1.25rem;
+}
+
+.notification-item .notification-content {
+    flex: 1;
+}
+
+.notification-item .notification-title {
+    font-weight: 600;
+    margin-bottom: var(--space-xs);
+}
+
+.notification-item .notification-time {
+    font-size: 0.75rem;
+    color: var(--gray-500);
+}
+
+/* ===========================
+   Month Overview
+   =========================== */
+.month-selector {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-md);
+    background: white;
+    padding: var(--space-md);
+    border-radius: var(--radius-lg);
+    margin-bottom: var(--space-lg);
+    box-shadow: var(--shadow-sm);
+}
+
+.month-selector span {
+    font-weight: 600;
+    min-width: 180px;
+    text-align: center;
+}
+
+.month-overview {
+    background: white;
+    border-radius: var(--radius-lg);
+    padding: var(--space-lg);
+    box-shadow: var(--shadow-sm);
+    overflow-x: auto;
+}
+
+.month-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.month-table th,
+.month-table td {
+    padding: 0.75rem 1rem;
+    text-align: left;
+    border-bottom: 1px solid var(--gray-200);
+}
+
+.month-table th {
+    background: var(--gray-50);
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: var(--gray-600);
+}
+
+.month-table td {
+    font-size: 0.9rem;
+}
+
+.month-table .positive {
+    color: var(--success-color);
+}
+
+.month-table .negative {
+    color: var(--danger-color);
+}
+
+.month-table .highlight {
+    font-weight: 600;
+}
+
+/* ===========================
+   Week Summary / Deviations
+   =========================== */
+.week-summary-panel {
+    background: white;
+    border-radius: var(--radius-lg);
+    padding: var(--space-lg);
+    margin-top: var(--space-lg);
+    box-shadow: var(--shadow-sm);
+}
+
+.week-summary-panel h4 {
+    margin-bottom: var(--space-md);
+}
+
+.deviations-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+
+.deviation-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    padding: var(--space-md);
+    border-radius: var(--radius-md);
+    font-size: 0.9rem;
+}
+
+.deviation-item.late {
+    background: #fef2f2;
+    border-left: 3px solid var(--danger-color);
+}
+
+.deviation-item.early {
+    background: #fffbeb;
+    border-left: 3px solid var(--warning-color);
+}
+
+.deviation-item .deviation-name {
+    font-weight: 600;
+    min-width: 100px;
+}
+
+.deviation-item .deviation-day {
+    color: var(--gray-500);
+    min-width: 80px;
+}
+
+.deviation-item .deviation-info {
+    flex: 1;
+}
+
+.deviation-item .deviation-reason {
+    font-size: 0.8rem;
+    color: var(--gray-500);
+    font-style: italic;
+}
+
+/* ===========================
+   Shift Cell Deviations
+   =========================== */
+.schedule-table td.shift-cell.has-deviation {
+    position: relative;
+}
+
+.schedule-table td.shift-cell.deviation-late {
+    background: #fee2e2 !important;
+}
+
+.schedule-table td.shift-cell.deviation-early {
+    background: #fef3c7 !important;
+}
+
+.deviation-indicator {
+    font-size: 0.65rem;
+    display: block;
+    margin-top: 2px;
+}
+
+.deviation-indicator.late {
+    color: var(--danger-color);
+}
+
+.deviation-indicator.early {
+    color: var(--warning-color);
+}
+
+/* ===========================
+   Employees Tab (Admin)
+   =========================== */
+.employees-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-lg);
+}
+
+.employees-list-admin {
+    display: grid;
+    gap: var(--space-md);
+}
+
+.employee-card {
+    background: white;
+    padding: var(--space-lg);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+}
+
+.employee-card .employee-info {
+    flex: 1;
+}
+
+.employee-card .employee-name {
+    font-weight: 600;
+    font-size: 1rem;
+}
+
+.employee-card .employee-type {
+    font-size: 0.8rem;
+    color: var(--gray-500);
+}
+
+/* ===========================
+   Modal Improvements
+   =========================== */
+.modal-info {
+    background: var(--gray-100);
+    padding: var(--space-md);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--space-lg);
+    font-size: 0.9rem;
+    color: var(--gray-600);
+}
+
+.actual-times {
+    margin-top: var(--space-lg);
+    padding-top: var(--space-lg);
+    border-top: 1px solid var(--gray-200);
+}
+
+.actual-times h4 {
+    font-size: 0.9rem;
+    color: var(--gray-600);
+    margin-bottom: var(--space-md);
+}
+
+.shift-times h4 {
+    font-size: 0.9rem;
+    color: var(--gray-600);
+    margin-bottom: var(--space-sm);
+}
+
+/* ===========================
+   Print Styles
+   =========================== */
+@media print {
+    body {
+        background: white;
+    }
+    
+    .app-header,
+    .week-selector button,
+    .panel-actions,
+    .form-actions,
+    .employees-section,
+    .editor-hint {
+        display: none;
+    }
+    
+    .admin-layout {
+        display: block;
+    }
+    
+    .availability-panel {
+        display: none;
+    }
+    
+    .schedule-panel {
+        box-shadow: none;
+    }
+    
+    .schedule-table {
+        font-size: 0.9rem;
+    }
+}
