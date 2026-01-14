@@ -98,7 +98,6 @@ const App = {
         
         // Early Leave Modal
         document.getElementById('submit-early').addEventListener('click', () => this.submitEarlyReport());
-        document.getElementById('submit-late').addEventListener('click', () => this.submitLateReport());
 
         // Admin Menu
         document.getElementById('admin-menu-toggle').addEventListener('click', () => this.toggleAdminMenu());
@@ -770,7 +769,8 @@ const App = {
     },
 
     updateAdminNotifications() {
-        const notifications = DataManager.getUnreadNotifications();
+        const notifications = DataManager.getUnreadNotifications().filter(n => !n.storeId || n.storeId === this.adminStore);
+
         const badge = document.getElementById('notification-badge');
         const count = document.getElementById('notification-count');
         const card = document.getElementById('notifications-card');
@@ -787,7 +787,7 @@ const App = {
                     <div class="notification-item ${n.type}">
                         <span class="notification-icon">${icon}</span>
                         <div class="notification-content">
-                            <div class="notification-title">${n.employeeName}: ${n.message}</div>
+                            <div class="notification-title">${n.employeeName}: ${n.message}${n.storeId ? ` · ${DataManager.getStoreName(n.storeId)}` : ''}</div>
                             ${n.reason ? `<div class="notification-reason">Grund: ${n.reason}</div>` : ''}
                             <div class="notification-time">${this.formatTimestamp(n.timestamp)}</div>
                         </div>
@@ -1089,31 +1089,85 @@ const App = {
     // ===========================
     // Report Late (Employee)
     // ===========================
+    formatMinutesToTime(totalMinutes) {
+        const m = Math.max(0, Math.min(1439, Math.round(totalMinutes)));
+        const hh = String(Math.floor(m / 60)).padStart(2, '0');
+        const mm = String(m % 60).padStart(2, '0');
+        return `${hh}:${mm}`;
+    },
+
+    applyEmployeeShiftDeviation(kind, minutes, reason) {
+        if (!this.currentUser) return null;
+
+        const today = new Date();
+        const weekKey = DateUtils.getWeekKey(today);
+        const dayKey = DateUtils.getTodayKey();
+        const delta = parseInt(minutes, 10) || 0;
+
+        const stores = this.getUserStores();
+        for (const storeId of stores) {
+            const schedule = DataManager.getScheduleForWeek(weekKey, storeId);
+            const dayShifts = schedule?.shifts?.[dayKey] || [];
+            const shift = dayShifts.find(s => s.employeeId === this.currentUser.id);
+            if (!schedule || !shift) continue;
+
+            const plannedStart = DateUtils.parseTimeToMinutes(shift.start);
+            const plannedEnd = DateUtils.parseTimeToMinutes(shift.end);
+
+            shift.deviation = shift.deviation || {};
+
+            if (kind === 'late') {
+                const actualStartMin = Math.min(plannedStart + delta, plannedEnd);
+                shift.actualStart = this.formatMinutesToTime(actualStartMin);
+                shift.deviation.lateMinutes = actualStartMin - plannedStart;
+                if (reason) shift.deviation.reason = reason;
+            }
+
+            if (kind === 'early') {
+                const actualEndMin = Math.max(plannedEnd - delta, plannedStart);
+                shift.actualEnd = this.formatMinutesToTime(actualEndMin);
+                shift.deviation.earlyMinutes = plannedEnd - actualEndMin;
+                if (reason) shift.deviation.reason = reason;
+            }
+
+            schedule.storeId = storeId;
+            DataManager.saveSchedule(schedule);
+            return storeId;
+        }
+
+        return null;
+    },
+
     submitLateReport() {
         if (!this.currentUser) {
             this.showToast('Bitte melde dich zuerst an.', 'error');
             return;
         }
 
-        const minutes = document.getElementById('late-minutes').value;
+        const minutes = parseInt(document.getElementById('late-minutes').value, 10) || 0;
         const reason = document.getElementById('late-reason').value;
 
+        const storeId = this.applyEmployeeShiftDeviation('late', minutes, reason);
+
+        const today = new Date();
         const notification = {
-            id: Date.now().toString(),
             type: 'late',
             employeeId: this.currentUser.id,
             employeeName: this.currentUser.name,
+            storeId: storeId || this.employeeStore,
+            weekKey: DateUtils.getWeekKey(today),
+            dayKey: DateUtils.getTodayKey(),
+            date: today.toISOString().split('T')[0],
             message: `Kommt ${minutes} Minuten später`,
-            reason: reason || null,
-            timestamp: new Date().toISOString(),
-            read: false
+            reason: reason || null
         };
 
         DataManager.addNotification(notification);
-        
+
         this.hideModals();
         document.getElementById('late-reason').value = '';
-        this.showToast('Meldung gesendet! Die Chefs werden benachrichtigt.', 'success');
+        this.renderDashboard();
+        this.showToast('Meldung gesendet! (Ohne Backend nur auf diesem Gerät sichtbar)', 'success');
     },
 
     // ===========================
@@ -1125,25 +1179,30 @@ const App = {
             return;
         }
 
-        const minutes = document.getElementById('early-minutes').value;
+        const minutes = parseInt(document.getElementById('early-minutes').value, 10) || 0;
         const reason = document.getElementById('early-reason').value;
 
+        const storeId = this.applyEmployeeShiftDeviation('early', minutes, reason);
+
+        const today = new Date();
         const notification = {
-            id: Date.now().toString(),
             type: 'early',
             employeeId: this.currentUser.id,
             employeeName: this.currentUser.name,
+            storeId: storeId || this.employeeStore,
+            weekKey: DateUtils.getWeekKey(today),
+            dayKey: DateUtils.getTodayKey(),
+            date: today.toISOString().split('T')[0],
             message: `Geht ${minutes} Minuten früher`,
-            reason: reason || null,
-            timestamp: new Date().toISOString(),
-            read: false
+            reason: reason || null
         };
 
         DataManager.addNotification(notification);
-        
+
         this.hideModals();
         document.getElementById('early-reason').value = '';
-        this.showToast('Meldung gesendet! Die Chefs werden benachrichtigt.', 'success');
+        this.renderDashboard();
+        this.showToast('Meldung gesendet! (Ohne Backend nur auf diesem Gerät sichtbar)', 'success');
     },
 
     // ===========================
