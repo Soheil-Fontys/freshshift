@@ -109,6 +109,12 @@ const App = {
         const submitAbsenceBtn = document.getElementById('submit-absence-request');
         if (submitAbsenceBtn) submitAbsenceBtn.addEventListener('click', () => this.submitAbsenceRequest());
 
+        // Default availability (admin)
+        const saveDefaultBtn = document.getElementById('save-default-availability');
+        if (saveDefaultBtn) saveDefaultBtn.addEventListener('click', () => this.saveDefaultAvailability());
+        const clearDefaultBtn = document.getElementById('clear-default-availability');
+        if (clearDefaultBtn) clearDefaultBtn.addEventListener('click', () => this.clearDefaultAvailability());
+
         // Admin Menu
         document.getElementById('admin-menu-toggle').addEventListener('click', () => this.toggleAdminMenu());
         const adminStoreSelect = document.getElementById('admin-store-select');
@@ -669,6 +675,104 @@ const App = {
             `;
         }).join('');
     },
+
+    openDefaultAvailabilityModal(employeeId) {
+        const employee = DataManager.getEmployee(employeeId);
+        if (!employee) return;
+
+        this.currentDefaultAvailabilityEmployeeId = employeeId;
+
+        const info = document.getElementById('default-availability-employee');
+        if (info) {
+            info.textContent = `${employee.name} · ${DataManager.getStoreName(this.adminStore)}`;
+        }
+
+        const container = document.getElementById('default-availability-days');
+        if (!container) return;
+
+        const storeId = this.adminStore;
+        const defaults = employee.defaultAvailability?.[storeId]?.days || {};
+
+        container.innerHTML = DateUtils.DAY_KEYS.map((dayKey, idx) => {
+            const dayName = DateUtils.DAYS[idx];
+            const d = defaults[dayKey] || {};
+            const available = !!d.available;
+            const start = d.start || '10:00';
+            const end = d.end || '20:00';
+
+            return `
+                <div class="default-day-card">
+                    <div class="default-day-header">
+                        <h4>${dayName}</h4>
+                        <label class="availability-toggle">
+                            <input type="checkbox" id="def_${dayKey}_available" ${available ? 'checked' : ''} onchange="document.getElementById('def_${dayKey}_times').style.display = this.checked ? 'flex' : 'none'">
+                            Standard verfügbar
+                        </label>
+                    </div>
+                    <div class="default-time-row" id="def_${dayKey}_times" style="${available ? '' : 'display:none'}">
+                        <div class="form-group">
+                            <label>Von</label>
+                            <input type="time" id="def_${dayKey}_start" value="${start}" step="60" class="time-input-24h" />
+                        </div>
+                        <div class="form-group">
+                            <label>Bis</label>
+                            <input type="time" id="def_${dayKey}_end" value="${end}" step="60" class="time-input-24h" />
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        this.showModal('default-availability-modal');
+    },
+
+    saveDefaultAvailability() {
+        const employeeId = this.currentDefaultAvailabilityEmployeeId;
+        const employee = DataManager.getEmployee(employeeId);
+        if (!employee) return;
+
+        const storeId = this.adminStore;
+        const days = {};
+
+        DateUtils.DAY_KEYS.forEach(dayKey => {
+            const available = document.getElementById(`def_${dayKey}_available`)?.checked || false;
+            days[dayKey] = {
+                available,
+                start: available ? (document.getElementById(`def_${dayKey}_start`)?.value || '10:00') : null,
+                end: available ? (document.getElementById(`def_${dayKey}_end`)?.value || '20:00') : null
+            };
+        });
+
+        const merged = {
+            ...(employee.defaultAvailability || {}),
+            [storeId]: {
+                days,
+                updatedAt: new Date().toISOString()
+            }
+        };
+
+        DataManager.updateEmployee({ id: employeeId, defaultAvailability: merged });
+        this.hideModals();
+        this.renderEmployeesTab();
+        this.showToast('Standardverfügbarkeit gespeichert!', 'success');
+    },
+
+    clearDefaultAvailability() {
+        const employeeId = this.currentDefaultAvailabilityEmployeeId;
+        const employee = DataManager.getEmployee(employeeId);
+        if (!employee) return;
+
+        const storeId = this.adminStore;
+        const merged = { ...(employee.defaultAvailability || {}) };
+        delete merged[storeId];
+
+        DataManager.updateEmployee({ id: employeeId, defaultAvailability: merged });
+        this.hideModals();
+        this.renderEmployeesTab();
+        this.showToast('Standardverfügbarkeit entfernt.', 'success');
+    },
+
+    currentDefaultAvailabilityEmployeeId: null,
 
     openAbsenceRequestModal() {
         if (!this.currentUser) return;
@@ -1596,23 +1700,26 @@ const App = {
     // ===========================
     renderAvailabilityForm() {
         this.updateWeekDisplay();
-        const container = document.querySelector('.days-container');
+        const container = document.querySelector('#page-availability .days-container');
         const dates = DateUtils.getWeekDates(this.currentWeek);
         const weekKey = DateUtils.getWeekKey(this.currentWeek);
-        
+
         this.ensureEmployeeStoreSelectors(weekKey);
 
         const existingAvail = this.currentUser ?
             DataManager.getEmployeeAvailability(this.currentUser.id, weekKey, this.employeeStore) : null;
+
+        const defaults = this.currentUser?.defaultAvailability?.[this.employeeStore] || null;
 
         container.innerHTML = '';
 
         DateUtils.DAYS.forEach((dayName, index) => {
             const dayKey = DateUtils.DAY_KEYS[index];
             const date = dates[index];
-            const existing = existingAvail?.days?.[dayKey] || {};
+
+            const existing = existingAvail?.days?.[dayKey] || defaults?.days?.[dayKey] || {};
             const isSunday = dayKey === 'sunday';
-            
+
             const card = document.createElement('div');
             card.className = `day-card ${!existing.available ? 'unavailable' : ''} ${isSunday ? 'sunday' : ''}`;
             card.innerHTML = `
@@ -1647,7 +1754,7 @@ const App = {
             container.appendChild(card);
         });
 
-        document.getElementById('general-notes').value = existingAvail?.notes || '';
+        document.getElementById('general-notes').value = existingAvail?.notes || defaults?.notes || '';
     },
 
     toggleDayAvailability(dayKey, available) {
@@ -2496,6 +2603,9 @@ const App = {
                     <div class="employee-actions">
                         <button class="btn btn-secondary btn-small" onclick="App.openAbsenceModal('${emp.id}')">
                             <span class="btn-icon-inline">📅</span> Abwesenheit
+                        </button>
+                        <button class="btn btn-secondary btn-small" onclick="App.openDefaultAvailabilityModal('${emp.id}')">
+                            <span class="btn-icon-inline">⏱️</span> Standard
                         </button>
                         <button class="btn btn-secondary btn-small btn-icon-only" onclick="App.openEditEmployeeModal('${emp.id}')">✎</button>
                         <button class="btn btn-danger btn-small btn-icon-only" onclick="App.deleteEmployee('${emp.id}')">✕</button>

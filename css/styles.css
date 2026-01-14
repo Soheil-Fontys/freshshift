@@ -1591,6 +1591,43 @@ body {
     accent-color: var(--primary-color);
 }
 
+.default-days {
+    display: grid;
+    gap: var(--space-md);
+}
+
+.default-day-card {
+    background: white;
+    border: 1px solid rgba(15, 23, 42, 0.10);
+    border-radius: var(--radius-lg);
+    padding: var(--space-md);
+}
+
+.default-day-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md);
+}
+
+.default-day-header h4 {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--gray-800);
+}
+
+.default-time-row {
+    display: flex;
+    gap: var(--space-md);
+    margin-top: var(--space-sm);
+}
+
+.default-time-row .form-group {
+    flex: 1;
+    margin: 0;
+}
+
+
 
 .employee-card {
     background: white;
