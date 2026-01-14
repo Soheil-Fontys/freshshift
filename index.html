@@ -574,11 +574,11 @@
                         <div class="form-row">
                             <div class="form-group">
                                 <label for="shift-start">Geplant von</label>
-                                <input type="text" id="shift-start" value="10:00" pattern="[0-2][0-9]:[0-5][0-9]" placeholder="HH:MM" class="time-input-24h">
+                                <input type="time" id="shift-start" value="10:00" step="60" class="time-input-24h">
                             </div>
                             <div class="form-group">
                                 <label for="shift-end">Geplant bis</label>
-                                <input type="text" id="shift-end" value="20:00" pattern="[0-2][0-9]:[0-5][0-9]" placeholder="HH:MM" class="time-input-24h">
+                                <input type="time" id="shift-end" value="20:00" step="60" class="time-input-24h">
                             </div>
                         </div>
                         
@@ -587,11 +587,11 @@
                             <div class="form-row">
                                 <div class="form-group">
                                     <label for="actual-start">Tatsächlich von</label>
-                                    <input type="text" id="actual-start" pattern="[0-2][0-9]:[0-5][0-9]" placeholder="HH:MM" class="time-input-24h">
+                                    <input type="time" id="actual-start" step="60" class="time-input-24h">
                                 </div>
                                 <div class="form-group">
                                     <label for="actual-end">Tatsächlich bis</label>
-                                    <input type="text" id="actual-end" pattern="[0-2][0-9]:[0-5][0-9]" placeholder="HH:MM" class="time-input-24h">
+                                    <input type="time" id="actual-end" step="60" class="time-input-24h">
                                 </div>
                             </div>
                             <div class="form-group">

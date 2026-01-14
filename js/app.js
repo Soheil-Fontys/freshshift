@@ -1214,11 +1214,11 @@ const App = {
                 <div class="time-inputs" id="${dayKey}-times" style="${!existing.available ? 'display:none' : ''}">
                     <div class="time-group">
                         <label>Von:</label>
-                        <input type="text" name="${dayKey}_start" value="${existing.start || '10:00'}" pattern="[0-2][0-9]:[0-5][0-9]" placeholder="HH:MM" class="time-input-24h">
+                        <input type="time" name="${dayKey}_start" value="${existing.start || '10:00'}" step="60" class="time-input-24h">
                     </div>
                     <div class="time-group">
                         <label>Bis:</label>
-                        <input type="text" name="${dayKey}_end" value="${existing.end || '20:00'}" pattern="[0-2][0-9]:[0-5][0-9]" placeholder="HH:MM" class="time-input-24h">
+                        <input type="time" name="${dayKey}_end" value="${existing.end || '20:00'}" step="60" class="time-input-24h">
                     </div>
                 </div>
                 <div class="day-notes" id="${dayKey}-notes" style="${!existing.available ? 'display:none' : ''}">
