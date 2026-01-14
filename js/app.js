@@ -9,51 +9,140 @@ const App = {
     currentUser: null,
     currentEditCell: null,
 
+    adminStore: 'fresh_fries',
+    employeeStore: 'fresh_fries',
+
+
     init() {
+        this.adminStore = localStorage.getItem('freshshift_admin_store') || 'fresh_fries';
+        this.employeeStore = localStorage.getItem('freshshift_employee_store') || 'fresh_fries';
+
         this.bindEvents();
         this.loadEmployeeDropdown();
+        this.populateAdminStoreSelect();
         this.updateWeekDisplay();
         this.updateMonthDisplay();
+        this.updateAvailWeekDisplay();
+        this.checkExistingSession();
+    },
+
+    // ===========================
+    // Session Management
+    // ===========================
+    checkExistingSession() {
+        // Check if admin is logged in
+        if (DataManager.isAdminSession()) {
+            this.showScreen('admin-screen');
+            return;
+        }
+
+        // Check if employee is logged in
+        const savedUser = DataManager.getCurrentUser();
+        if (savedUser) {
+            // Verify employee still exists
+            const employee = DataManager.getEmployee(savedUser.id);
+            if (employee) {
+                this.currentUser = employee;
+                this.showScreen('dashboard-screen');
+                return;
+            } else {
+                // Employee was deleted, clear session
+                DataManager.clearCurrentUser();
+            }
+        }
+
+        // No valid session, show login screen
+        this.showScreen('login-screen');
     },
 
     // ===========================
     // Event Bindings
     // ===========================
     bindEvents() {
-        // Login Screen
+        // Login Screen - Toggle
+        document.querySelectorAll('.login-toggle-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => this.handleLoginToggle(e.target));
+        });
+
+        // Login Screen - Actions
         document.getElementById('login-btn').addEventListener('click', () => this.handleLogin());
-        document.getElementById('admin-login-btn').addEventListener('click', () => {
-            this.showScreen('admin-screen');
+        document.getElementById('admin-login-btn').addEventListener('click', () => this.handleAdminLogin());
+        document.getElementById('admin-password').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') this.handleAdminLogin();
         });
 
-        // Employee Section Tabs
-        document.querySelectorAll('.section-tab').forEach(tab => {
-            tab.addEventListener('click', (e) => this.handleSectionTab(e.target));
+        // Dashboard Menu
+        document.getElementById('menu-toggle').addEventListener('click', () => this.toggleMenu());
+        document.getElementById('menu-close').addEventListener('click', () => this.toggleMenu());
+        document.getElementById('menu-overlay').addEventListener('click', () => this.toggleMenu());
+        document.getElementById('menu-logout').addEventListener('click', () => this.logout());
+        
+        // Dashboard Menu Items
+        document.querySelectorAll('#side-menu .menu-item').forEach(item => {
+            item.addEventListener('click', (e) => this.navigateTo(e.target.dataset.page));
         });
 
-        // Availability Screen
-        document.getElementById('back-to-login').addEventListener('click', () => this.logout());
+        // Dashboard Quick Actions
+        document.getElementById('btn-late').addEventListener('click', () => this.showModal('late-modal'));
+        document.getElementById('btn-early').addEventListener('click', () => this.showModal('early-modal'));
+
+        // Availability Form
         document.getElementById('availability-form').addEventListener('submit', (e) => this.handleAvailabilitySubmit(e));
         document.getElementById('prev-week').addEventListener('click', () => this.changeWeek(-1));
         document.getElementById('next-week').addEventListener('click', () => this.changeWeek(1));
         document.getElementById('my-prev-week').addEventListener('click', () => this.changeWeek(-1, false, true));
         document.getElementById('my-next-week').addEventListener('click', () => this.changeWeek(1, false, true));
 
-        // Report Late
-        document.getElementById('report-late-btn').addEventListener('click', () => this.showModal('late-modal'));
+        // Report Late Modal
+        document.getElementById('submit-late').addEventListener('click', () => this.submitLateReport());
+        
+        // Early Leave Modal
+        document.getElementById('submit-early').addEventListener('click', () => this.submitEarlyReport());
         document.getElementById('submit-late').addEventListener('click', () => this.submitLateReport());
 
-        // Admin Screen
-        document.getElementById('admin-back-to-login').addEventListener('click', () => this.showScreen('login-screen'));
+        // Admin Menu
+        document.getElementById('admin-menu-toggle').addEventListener('click', () => this.toggleAdminMenu());
+        const adminStoreSelect = document.getElementById('admin-store-select');
+        if (adminStoreSelect) {
+            adminStoreSelect.addEventListener('change', (e) => this.setAdminStore(e.target.value));
+        }
+
+        const employeeStoreSelect = document.getElementById('employee-store-select');
+        if (employeeStoreSelect) {
+            employeeStoreSelect.addEventListener('change', (e) => this.setEmployeeStore(e.target.value));
+        }
+
+        const myStoreSelect = document.getElementById('my-store-select');
+        if (myStoreSelect) {
+            myStoreSelect.addEventListener('change', (e) => this.setEmployeeStore(e.target.value, true));
+        }
+        document.getElementById('admin-menu-close').addEventListener('click', () => this.toggleAdminMenu());
+        document.getElementById('admin-menu-overlay').addEventListener('click', () => this.toggleAdminMenu());
+        document.getElementById('admin-menu-logout').addEventListener('click', () => this.adminLogout());
+        
+        // Admin Menu Items
+        document.querySelectorAll('#admin-side-menu .menu-item').forEach(item => {
+            item.addEventListener('click', (e) => this.navigateAdminTo(e.target.dataset.page));
+        });
+
+        // Admin Planner
         document.getElementById('admin-prev-week').addEventListener('click', () => this.changeWeek(-1, true));
         document.getElementById('admin-next-week').addEventListener('click', () => this.changeWeek(1, true));
         document.getElementById('save-schedule').addEventListener('click', () => this.saveSchedule());
-        document.getElementById('release-schedule').addEventListener('click', () => this.releaseSchedule());
+         document.getElementById('release-schedule').addEventListener('click', () => this.releaseSchedule());
+         document.getElementById('copy-last-week').addEventListener('click', () => this.copyLastWeek());
+         document.getElementById('print-schedule').addEventListener('click', () => this.printSchedule());
 
-        // Admin Tabs
-        document.querySelectorAll('.tab-btn').forEach(tab => {
-            tab.addEventListener('click', (e) => this.handleAdminTab(e.target));
-        });
+         // Copy week modal actions
+         document.getElementById('copy-week-skip').addEventListener('click', () => this.applyCopyWeek(true));
+         document.getElementById('copy-week-all').addEventListener('click', () => this.applyCopyWeek(false));
+        
+        // Admin quick action
+        document.getElementById('quick-edit-plan').addEventListener('click', () => this.navigateAdminTo('admin-planner'));
+        
+        // Admin Availability Navigation
+        document.getElementById('avail-prev-week').addEventListener('click', () => this.changeAvailWeek(-1));
+        document.getElementById('avail-next-week').addEventListener('click', () => this.changeAvailWeek(1));
 
         // Month Navigation
         document.getElementById('prev-month').addEventListener('click', () => this.changeMonth(-1));
@@ -64,8 +153,29 @@ const App = {
         document.getElementById('clear-notifications').addEventListener('click', () => this.clearNotifications());
 
         // Employees
-        document.getElementById('add-employee-btn').addEventListener('click', () => this.showModal('add-employee-modal'));
+        document.getElementById('add-employee-btn').addEventListener('click', () => this.openAddEmployeeModal());
         document.getElementById('save-new-employee').addEventListener('click', () => this.saveNewEmployee());
+
+        // Employee store selection in modal
+        const storeFresh = document.getElementById('store-fresh-fries');
+        const storeYes = document.getElementById('store-yes-fresh');
+        const primaryStore = document.getElementById('new-emp-primary-store');
+
+        if (storeFresh) storeFresh.addEventListener('change', () => this.syncEmployeeStoreOptions(primaryStore?.value));
+        if (storeYes) storeYes.addEventListener('change', () => this.syncEmployeeStoreOptions(primaryStore?.value));
+        if (primaryStore) primaryStore.addEventListener('change', (e) => this.syncEmployeeStoreOptions(e.target.value));
+
+        // Data (Backup/Import)
+        const exportBtn = document.getElementById('export-data');
+        if (exportBtn) exportBtn.addEventListener('click', () => this.exportBackup());
+
+        const importBtn = document.getElementById('import-data');
+        if (importBtn) importBtn.addEventListener('click', () => this.importBackup());
+
+        // Absences
+        document.getElementById('save-absence').addEventListener('click', () => this.saveAbsence());
+        document.getElementById('delete-absence').addEventListener('click', () => this.deleteAbsence());
+
 
         // Shift Modal
         document.getElementById('save-shift').addEventListener('click', () => this.saveShift());
@@ -84,12 +194,11 @@ const App = {
         document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
         document.getElementById(screenId).classList.add('active');
 
-        if (screenId === 'availability-screen') {
-            this.renderAvailabilityForm();
-            this.renderMyScheduleSection();
+        if (screenId === 'dashboard-screen') {
+            this.renderDashboard();
         } else if (screenId === 'admin-screen') {
-            this.renderAdminView();
-            this.updateNotificationBadge();
+            this.populateAdminStoreSelect();
+            this.renderAdminDashboard();
         }
     },
 
@@ -103,7 +212,305 @@ const App = {
     },
 
     // ===========================
-    // Section Tabs (Employee)
+    // Dashboard Menu
+    // ===========================
+    toggleMenu() {
+        document.getElementById('side-menu').classList.toggle('active');
+        document.getElementById('menu-overlay').classList.toggle('active');
+    },
+
+    navigateTo(page) {
+        // Close menu
+        this.toggleMenu();
+        
+        // Update menu active state
+        document.querySelectorAll('#side-menu .menu-item').forEach(item => {
+            item.classList.toggle('active', item.dataset.page === page);
+        });
+        
+        // Show page content
+        document.querySelectorAll('#dashboard-screen .page-content').forEach(p => p.classList.remove('active'));
+        document.getElementById(`page-${page}`).classList.add('active');
+        
+        // Render content if needed
+        const weekKey = DateUtils.getWeekKey(this.currentWeek);
+        this.ensureEmployeeStoreSelectors(weekKey);
+
+        if (page === 'availability') {
+            this.renderAvailabilityForm();
+        } else if (page === 'schedule') {
+            this.renderMyScheduleSection();
+        } else if (page === 'dashboard') {
+            this.renderDashboard();
+        }
+    },
+
+    // ===========================
+    // Admin Menu
+    // ===========================
+    toggleAdminMenu() {
+        document.getElementById('admin-side-menu').classList.toggle('active');
+        document.getElementById('admin-menu-overlay').classList.toggle('active');
+    },
+
+    navigateAdminTo(page) {
+        // Close menu if open
+        const menu = document.getElementById('admin-side-menu');
+        if (menu.classList.contains('active')) {
+            this.toggleAdminMenu();
+        }
+        
+        // Update menu active state
+        document.querySelectorAll('#admin-side-menu .menu-item').forEach(item => {
+            item.classList.toggle('active', item.dataset.page === page);
+        });
+        
+        // Show page content
+        document.querySelectorAll('#admin-screen .page-content').forEach(p => p.classList.remove('active'));
+        document.getElementById(`page-${page}`).classList.add('active');
+        
+        // Render content if needed
+        if (page === 'admin-dashboard') {
+            this.renderAdminDashboard();
+        } else if (page === 'admin-planner') {
+            this.renderAdminView();
+        } else if (page === 'admin-availability') {
+            this.renderAdminAvailability();
+        } else if (page === 'admin-month') {
+            this.renderMonthOverview();
+        } else if (page === 'admin-employees') {
+            this.renderEmployeesTab();
+        } else if (page === 'admin-data') {
+            this.renderAdminDataPage();
+        }
+    },
+
+    // ===========================
+    // Admin Availability Week Navigation
+    // ===========================
+    availWeek: new Date(),
+    
+    changeAvailWeek(delta) {
+        this.availWeek.setDate(this.availWeek.getDate() + (delta * 7));
+        this.updateAvailWeekDisplay();
+        this.renderAdminAvailability();
+    },
+
+    updateAvailWeekDisplay() {
+        const display = DateUtils.formatWeekDisplay(this.availWeek);
+        document.getElementById('avail-week-display').textContent = display;
+    },
+
+    renderAdminAvailability() {
+        this.updateAvailWeekDisplay();
+        const table = document.getElementById('availability-table');
+        const weekKey = DateUtils.getWeekKey(this.availWeek);
+        const dates = DateUtils.getWeekDates(this.availWeek);
+        const employees = DataManager.getEmployees().filter(e => (e.stores || []).includes(this.adminStore));
+        const availabilities = DataManager.getAvailabilityForWeek(weekKey, this.adminStore);
+
+        // Header
+        let html = '<thead><tr><th class="name-header">Name</th>';
+        DateUtils.DAY_KEYS.forEach((dayKey, index) => {
+            html += `<th>${DateUtils.DAYS_SHORT[index]}<br><small>${DateUtils.formatDate(dates[index])}</small></th>`;
+        });
+        html += '</tr></thead><tbody>';
+
+        // Rows
+        employees.forEach(emp => {
+            const avail = availabilities.find(a => a.employeeId === emp.id);
+            html += `<tr><td class="name-cell">${emp.name}</td>`;
+            
+            DateUtils.DAY_KEYS.forEach(dayKey => {
+                const day = avail?.days?.[dayKey];
+                if (day?.available) {
+                    html += `<td class="available-cell">${day.start}–${day.end}</td>`;
+                } else {
+                    html += `<td class="unavailable-cell">–</td>`;
+                }
+            });
+            html += '</tr>';
+        });
+
+        html += '</tbody>';
+        table.innerHTML = html;
+    },
+
+    // ===========================
+    // Dashboard Rendering
+    // ===========================
+    renderDashboard() {
+        if (!this.currentUser) return;
+        
+        // Update user names
+        document.getElementById('dashboard-user-name').textContent = this.currentUser.name.split(' ')[0];
+        document.getElementById('menu-user-name').textContent = this.currentUser.name;
+
+        const storeEl = document.getElementById('menu-user-stores');
+        if (storeEl) {
+            const stores = this.getUserStores();
+            storeEl.innerHTML = stores.map(s => `<span class="store-chip">${DataManager.getStoreName(s)}</span>`).join('');
+        }
+        
+        // Render all dashboard components
+        this.renderTodayShift();
+        this.renderWeekOverview();
+        this.renderUpcomingShifts();
+        this.updateWeekDisplay();
+    },
+
+    renderTodayShift() {
+        const container = document.getElementById('today-shift');
+        const dateEl = document.getElementById('today-date');
+        
+        const today = new Date();
+        const dayNames = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];
+        dateEl.textContent = `${dayNames[today.getDay()]}, ${DateUtils.formatDate(today)}`;
+        
+        const weekKey = DateUtils.getWeekKey(today);
+        const todayKey = DateUtils.getTodayKey();
+
+        const stores = this.getUserStores();
+        const myShifts = stores.map(storeId => {
+            const schedule = DataManager.getScheduleForWeek(weekKey, storeId);
+            const dayShifts = schedule?.shifts?.[todayKey] || [];
+            const shift = dayShifts.find(s => s.employeeId === this.currentUser?.id);
+            return shift ? { storeId, shift } : null;
+        }).filter(Boolean);
+
+        if (myShifts.length > 0) {
+            if (myShifts.length === 1) {
+                const { storeId, shift } = myShifts[0];
+                const hours = DateUtils.calculateDuration(shift.start, shift.end);
+                container.innerHTML = `
+                    <div class="shift-time-big">${shift.start} – ${shift.end}</div>
+                    <div class="shift-duration">${DateUtils.formatDuration(hours)} · ${DataManager.getStoreName(storeId)}</div>
+                `;
+            } else {
+                container.innerHTML = myShifts.map(({ storeId, shift }) => {
+                    const hours = DateUtils.calculateDuration(shift.start, shift.end);
+                    return `<div class="today-multi-shift"><strong>${DataManager.getStoreName(storeId)}:</strong> ${shift.start} – ${shift.end} <span class="muted">(${DateUtils.formatDuration(hours)})</span></div>`;
+                }).join('');
+            }
+        } else {
+            container.innerHTML = `
+                <div class="day-off-icon">🎉</div>
+                <div class="no-shift">Heute frei!</div>
+            `;
+        }
+    },
+
+    renderWeekOverview() {
+        const container = document.getElementById('week-overview');
+        const weekBadge = document.getElementById('dashboard-week');
+        
+        const weekKey = DateUtils.getWeekKey(this.currentWeek);
+        const dates = DateUtils.getWeekDates(this.currentWeek);
+        const today = new Date();
+        const stores = this.getUserStores();
+        
+        weekBadge.textContent = `KW ${DateUtils.getWeekNumber(this.currentWeek)}`;
+        
+        let totalHours = 0;
+        let shiftCount = 0;
+        
+        container.innerHTML = DateUtils.DAY_KEYS.map((dayKey, index) => {
+            const date = dates[index];
+            const isToday = date.toDateString() === today.toDateString();
+
+            const shifts = stores.map(storeId => {
+                const schedule = DataManager.getScheduleForWeek(weekKey, storeId);
+                const dayShifts = schedule?.shifts?.[dayKey] || [];
+                const myShift = dayShifts.find(s => s.employeeId === this.currentUser?.id);
+                return myShift ? { storeId, shift: myShift } : null;
+            }).filter(Boolean);
+
+            let hours = 0;
+            if (shifts.length > 0) {
+                shifts.forEach(({ shift }) => {
+                    hours += DateUtils.calculateDuration(shift.start, shift.end);
+                });
+                totalHours += hours;
+                shiftCount += shifts.length;
+            }
+
+            const hoursText = shifts.length > 0 ? `${Math.round(hours * 10) / 10}h` : '–';
+
+            return `
+                <div class="week-day ${shifts.length > 0 ? 'has-shift' : ''} ${isToday ? 'is-today' : ''}">
+                    <div class="day-name">${DateUtils.DAYS_SHORT[index]}</div>
+                    <div class="day-hours">${hoursText}</div>
+                </div>
+            `;
+        }).join('');
+        
+        document.getElementById('stat-shifts').textContent = shiftCount;
+        document.getElementById('stat-hours').textContent = DateUtils.formatDuration(totalHours);
+    },
+
+    renderUpcomingShifts() {
+        const container = document.getElementById('upcoming-shifts');
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        const upcoming = [];
+        
+        // Check next 14 days
+        for (let i = 0; i < 14 && upcoming.length < 3; i++) {
+            const checkDate = new Date(today);
+            checkDate.setDate(today.getDate() + i);
+            
+            const weekKey = DateUtils.getWeekKey(checkDate);
+            const dayIndex = (checkDate.getDay() + 6) % 7; // Monday = 0
+            const dayKey = DateUtils.DAY_KEYS[dayIndex];
+
+            const stores = this.getUserStores();
+            let found = null;
+
+            for (const storeId of stores) {
+                const schedule = DataManager.getScheduleForWeek(weekKey, storeId);
+                const dayShifts = schedule?.shifts?.[dayKey] || [];
+                const myShift = dayShifts.find(s => s.employeeId === this.currentUser?.id);
+                if (myShift) {
+                    found = { storeId, shift: myShift };
+                    break;
+                }
+            }
+
+            if (found && i > 0) { // Skip today
+                upcoming.push({
+                    date: checkDate,
+                    dayName: DateUtils.DAYS_SHORT[dayIndex],
+                    storeId: found.storeId,
+                    shift: found.shift
+                });
+            }
+        }
+        
+        if (upcoming.length === 0) {
+            container.innerHTML = '<div class="no-upcoming">Keine weiteren Schichten geplant</div>';
+            return;
+        }
+        
+        container.innerHTML = upcoming.map(item => {
+            const hours = DateUtils.calculateDuration(item.shift.start, item.shift.end);
+            return `
+                <div class="upcoming-shift">
+                    <div class="shift-date">
+                        <div class="day">${item.dayName}</div>
+                        <div class="date">${DateUtils.formatDate(item.date)}</div>
+                    </div>
+                    <div class="shift-info">
+                        <div class="time">${item.shift.start} – ${item.shift.end}</div>
+                        <div class="duration">${DateUtils.formatDuration(hours)} · ${DataManager.getStoreName(item.storeId)}</div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    },
+
+    // ===========================
+    // Section Tabs (Employee) - REMOVED, using menu now
     // ===========================
     handleSectionTab(tab) {
         const section = tab.dataset.section;
@@ -119,6 +526,277 @@ const App = {
         // Render content
         if (section === 'my-schedule') {
             this.renderMyScheduleSection();
+        }
+    },
+
+    // ===========================
+    // Admin Dashboard
+    // ===========================
+    renderAdminDashboard() {
+        const today = new Date();
+        const weekKey = DateUtils.getWeekKey(today);
+        const schedule = DataManager.getScheduleForWeek(weekKey, this.adminStore);
+        const employees = DataManager.getEmployees().filter(e => (e.stores || []).includes(this.adminStore));
+        const availabilities = DataManager.getAvailabilityForWeek(weekKey, this.adminStore);
+        
+        // Update week badge
+        document.getElementById('admin-dashboard-week').textContent = `KW ${DateUtils.getWeekNumber(today)}`;
+        
+        // Update today date
+        const dayNames = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];
+        document.getElementById('admin-today-date').textContent = `${dayNames[today.getDay()]}, ${DateUtils.formatDate(today)}`;
+        
+        // Render week status
+        this.renderAdminWeekStatus(schedule, employees);
+        
+        // Render week overview (mini calendar)
+        this.renderAdminWeekOverview(schedule);
+        
+        // Render today's shifts
+        this.renderAdminTodayShifts(schedule, today);
+        
+        // Render upcoming absences
+        this.renderAdminUpcomingAbsences();
+        
+        // Check for missing availabilities for next week
+        this.renderMissingAvailabilities(employees);
+        
+        // Render quick stats
+        this.renderAdminQuickStats(employees, schedule, availabilities);
+        
+        // Render notifications
+        this.updateAdminNotifications();
+    },
+
+    renderAdminWeekOverview(schedule) {
+        const container = document.getElementById('admin-week-overview');
+        if (!container) return;
+        
+        const dates = DateUtils.getWeekDates(new Date());
+        const today = new Date();
+        
+        container.innerHTML = `
+            <div class="admin-mini-week">
+                ${DateUtils.DAY_KEYS.map((dayKey, index) => {
+                    const date = dates[index];
+                    const dayShifts = schedule?.shifts?.[dayKey] || [];
+                    const isToday = date.toDateString() === today.toDateString();
+                    const shiftCount = dayShifts.length;
+                    
+                    return `
+                        <div class="mini-week-day ${isToday ? 'is-today' : ''} ${shiftCount > 0 ? 'has-shifts' : ''}">
+                            <span class="mini-day-name">${DateUtils.DAYS_SHORT[index]}</span>
+                            <span class="mini-day-count">${shiftCount > 0 ? shiftCount : '-'}</span>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        `;
+    },
+
+    renderAdminUpcomingAbsences() {
+        const container = document.getElementById('admin-upcoming-absences');
+        const card = document.getElementById('admin-absences-card');
+        if (!container || !card) return;
+        
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        const futureDate = new Date(today);
+        futureDate.setDate(futureDate.getDate() + 14);
+        
+        const absences = DataManager.getAbsences().filter(a => {
+            const endDate = new Date(a.endDate);
+            const startDate = new Date(a.startDate);
+            return endDate >= today && startDate <= futureDate;
+        }).sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
+        
+        if (absences.length === 0) {
+            container.innerHTML = '<div class="empty-state small">Keine Abwesenheiten in den nächsten 14 Tagen</div>';
+            return;
+        }
+        
+        container.innerHTML = absences.slice(0, 5).map(absence => {
+            const employee = DataManager.getEmployee(absence.employeeId);
+            const startDate = new Date(absence.startDate);
+            const endDate = new Date(absence.endDate);
+            const isActive = today >= startDate && today <= endDate;
+            
+            const typeIcon = absence.type === 'urlaub' ? '🏖️' : 
+                            absence.type === 'krank' ? '🤒' : '📅';
+            
+            const dateText = startDate.toISOString().split('T')[0] === endDate.toISOString().split('T')[0]
+                ? DateUtils.formatDate(startDate)
+                : `${DateUtils.formatDate(startDate)} – ${DateUtils.formatDate(endDate)}`;
+            
+            return `
+                <div class="admin-absence-item ${isActive ? 'active' : ''}">
+                    <span class="absence-icon">${typeIcon}</span>
+                    <span class="absence-employee">${employee?.name || 'Unbekannt'}</span>
+                    <span class="absence-date">${dateText}</span>
+                    ${isActive ? '<span class="absence-now">Jetzt</span>' : ''}
+                </div>
+            `;
+        }).join('');
+        
+        if (absences.length > 5) {
+            container.innerHTML += `<div class="more-link" onclick="App.navigateAdminTo('admin-employees')">+ ${absences.length - 5} weitere anzeigen</div>`;
+        }
+    },
+
+    renderMissingAvailabilities(employees) {
+        const card = document.getElementById('missing-avail-card');
+        const list = document.getElementById('missing-avail-list');
+        const badge = document.getElementById('next-week-badge');
+        if (!card || !list) return;
+        
+        // Get next week
+        const nextWeek = new Date();
+        nextWeek.setDate(nextWeek.getDate() + 7);
+        const nextWeekKey = DateUtils.getWeekKey(nextWeek);
+        const nextWeekAvailabilities = DataManager.getAvailabilityForWeek(nextWeekKey, this.adminStore);
+        
+        badge.textContent = `KW ${DateUtils.getWeekNumber(nextWeek)}`;
+        
+        // Find employees who haven't submitted availability for next week
+        const submittedIds = nextWeekAvailabilities.map(a => a.employeeId);
+        const missing = employees.filter(emp => !submittedIds.includes(emp.id));
+        
+        if (missing.length === 0) {
+            card.style.display = 'none';
+            return;
+        }
+        
+        card.style.display = 'block';
+        list.innerHTML = missing.map(emp => `
+            <div class="missing-avail-item">
+                <span class="employee-name">${emp.name}</span>
+                <span class="missing-label">Noch nicht eingereicht</span>
+            </div>
+        `).join('');
+    },
+
+    renderAdminWeekStatus(schedule, employees) {
+        const container = document.getElementById('admin-week-status');
+        
+        if (!schedule) {
+            container.innerHTML = `
+                <div class="status-warning">
+                    <span class="status-icon">⚠️</span>
+                    <span>Noch kein Wochenplan erstellt</span>
+                </div>
+            `;
+            return;
+        }
+        
+        // Count shifts
+        let totalShifts = 0;
+        let totalHours = 0;
+        
+        DateUtils.DAY_KEYS.forEach(dayKey => {
+            const dayShifts = schedule.shifts?.[dayKey] || [];
+            totalShifts += dayShifts.length;
+            dayShifts.forEach(shift => {
+                totalHours += DateUtils.calculateDuration(shift.start, shift.end);
+            });
+        });
+        
+        const statusClass = schedule.released ? 'status-success' : 'status-pending';
+        const statusText = schedule.released ? 'Plan freigegeben' : 'Plan nicht freigegeben';
+        const statusIcon = schedule.released ? '✓' : '⏳';
+        
+        container.innerHTML = `
+            <div class="${statusClass}">
+                <span class="status-icon">${statusIcon}</span>
+                <span>${statusText}</span>
+            </div>
+            <div class="week-status-stats">
+                <span>${totalShifts} Schichten</span>
+                <span>${DateUtils.formatDuration(totalHours)}</span>
+            </div>
+        `;
+    },
+
+    renderAdminTodayShifts(schedule, today) {
+        const container = document.getElementById('admin-today-shifts');
+        const todayKey = DateUtils.getTodayKey();
+        const todayShifts = schedule?.shifts?.[todayKey] || [];
+        
+        if (todayShifts.length === 0) {
+            container.innerHTML = '<div class="empty-today">Keine Schichten heute</div>';
+            return;
+        }
+        
+        container.innerHTML = todayShifts.map(shift => {
+            let deviationBadge = '';
+            if (shift.deviation) {
+                if (shift.deviation.lateMinutes) {
+                    deviationBadge = `<span class="deviation-badge late">+${shift.deviation.lateMinutes}m</span>`;
+                } else if (shift.deviation.earlyMinutes) {
+                    deviationBadge = `<span class="deviation-badge early">-${shift.deviation.earlyMinutes}m</span>`;
+                }
+            }
+            
+            return `
+                <div class="today-shift-item">
+                    <span class="shift-employee">${shift.employeeName}</span>
+                    <span class="shift-time">${shift.start} – ${shift.end}</span>
+                    ${deviationBadge}
+                </div>
+            `;
+        }).join('');
+    },
+
+    renderAdminQuickStats(employees, schedule, availabilities) {
+        document.getElementById('stat-total-employees').textContent = employees.length;
+        
+        // Count week shifts and hours
+        let totalShifts = 0;
+        let totalHours = 0;
+        
+        if (schedule) {
+            DateUtils.DAY_KEYS.forEach(dayKey => {
+                const dayShifts = schedule.shifts?.[dayKey] || [];
+                totalShifts += dayShifts.length;
+                dayShifts.forEach(shift => {
+                    totalHours += DateUtils.calculateDuration(shift.start, shift.end);
+                });
+            });
+        }
+        
+        document.getElementById('stat-week-shifts').textContent = totalShifts;
+        document.getElementById('stat-week-hours').textContent = DateUtils.formatDuration(totalHours);
+        document.getElementById('stat-availabilities').textContent = availabilities.length;
+    },
+
+    updateAdminNotifications() {
+        const notifications = DataManager.getUnreadNotifications();
+        const badge = document.getElementById('notification-badge');
+        const count = document.getElementById('notification-count');
+        const card = document.getElementById('notifications-card');
+        const list = document.getElementById('notifications-list');
+        
+        if (notifications.length > 0) {
+            badge.style.display = 'block';
+            count.textContent = notifications.length;
+            card.style.display = 'block';
+            
+            list.innerHTML = notifications.map(n => {
+                const icon = n.type === 'early' ? '🚪' : '⏰';
+                return `
+                    <div class="notification-item ${n.type}">
+                        <span class="notification-icon">${icon}</span>
+                        <div class="notification-content">
+                            <div class="notification-title">${n.employeeName}: ${n.message}</div>
+                            ${n.reason ? `<div class="notification-reason">Grund: ${n.reason}</div>` : ''}
+                            <div class="notification-time">${this.formatTimestamp(n.timestamp)}</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        } else {
+            badge.style.display = 'none';
+            card.style.display = 'none';
         }
     },
 
@@ -152,12 +830,139 @@ const App = {
     loadEmployeeDropdown() {
         const select = document.getElementById('employee-select');
         const employees = DataManager.getEmployees();
-        
+
+        const storeOrder = ['fresh_fries', 'yes_fresh'];
+        const sorted = [...employees].sort((a, b) => {
+            const aStore = a.primaryStore || a.store || (a.stores?.[0]) || 'fresh_fries';
+            const bStore = b.primaryStore || b.store || (b.stores?.[0]) || 'fresh_fries';
+            const aIdx = storeOrder.indexOf(aStore);
+            const bIdx = storeOrder.indexOf(bStore);
+            if (aIdx !== bIdx) return aIdx - bIdx;
+            return String(a.name || '').localeCompare(String(b.name || ''), 'de');
+        });
+
         select.innerHTML = '<option value="">-- Bitte wählen --</option>';
-        employees.forEach(emp => {
-            select.innerHTML += `<option value="${emp.id}">${emp.name}</option>`;
+
+        const groups = new Map();
+        sorted.forEach(emp => {
+            const primary = emp.primaryStore || emp.store || (emp.stores?.[0]) || 'fresh_fries';
+            if (!groups.has(primary)) groups.set(primary, []);
+            groups.get(primary).push(emp);
+        });
+
+        storeOrder.forEach(storeId => {
+            const emps = groups.get(storeId) || [];
+            if (emps.length === 0) return;
+
+            const group = document.createElement('optgroup');
+            group.label = DataManager.getStoreName(storeId);
+
+            emps.forEach(emp => {
+                const stores = Array.isArray(emp.stores) ? emp.stores : [emp.store || emp.primaryStore || storeId];
+                const storeNames = stores.map(s => DataManager.getStoreName(s));
+                const suffix = storeNames.length > 1 ? ` (${storeNames.join(' / ')})` : ` (${storeNames[0]})`;
+
+                const opt = document.createElement('option');
+                opt.value = emp.id;
+                opt.textContent = `${emp.name}${suffix}`;
+                group.appendChild(opt);
+            });
+
+            select.appendChild(group);
         });
     },
+
+    populateAdminStoreSelect() {
+        const select = document.getElementById('admin-store-select');
+        if (!select) return;
+
+        const storeIds = Object.keys(DataManager.STORES);
+        select.innerHTML = storeIds
+            .map(id => `<option value="${id}">${DataManager.getStoreName(id)}</option>`)
+            .join('');
+
+        select.value = this.adminStore;
+    },
+
+    setAdminStore(storeId) {
+        this.adminStore = DataManager.normalizeStoreId(storeId);
+        localStorage.setItem('freshshift_admin_store', this.adminStore);
+
+        const select = document.getElementById('admin-store-select');
+        if (select) select.value = this.adminStore;
+
+        // Re-render current admin page
+        const active = document.querySelector('#admin-side-menu .menu-item.active');
+        const page = active?.dataset?.page || 'admin-dashboard';
+        this.navigateAdminTo(page);
+    },
+
+    setEmployeeStore(storeId, isSchedule = false) {
+        this.employeeStore = DataManager.normalizeStoreId(storeId);
+        localStorage.setItem('freshshift_employee_store', this.employeeStore);
+
+        const availSelect = document.getElementById('employee-store-select');
+        if (availSelect) availSelect.value = this.employeeStore;
+
+        const mySelect = document.getElementById('my-store-select');
+        if (mySelect) mySelect.value = this.employeeStore;
+
+        if (isSchedule) {
+            this.renderMyScheduleSection();
+        } else {
+            this.renderAvailabilityForm();
+        }
+    },
+
+    getUserStores() {
+        const u = this.currentUser;
+        if (!u) return ['fresh_fries'];
+        if (Array.isArray(u.stores) && u.stores.length > 0) return u.stores;
+        if (u.store) return [u.store];
+        return [u.primaryStore || 'fresh_fries'];
+    },
+
+    ensureEmployeeStoreSelectors(weekKey) {
+        const stores = this.getUserStores();
+
+        // Availability selector: show if user can work multiple stores
+        const availRow = document.getElementById('employee-store-row');
+        const availSelect = document.getElementById('employee-store-select');
+        if (availRow && availSelect) {
+            if (stores.length <= 1) {
+                availRow.style.display = 'none';
+            } else {
+                availRow.style.display = 'flex';
+                availSelect.innerHTML = stores.map(id => `<option value="${id}">${DataManager.getStoreName(id)}</option>`).join('');
+                if (!stores.includes(this.employeeStore)) this.employeeStore = stores[0];
+                availSelect.value = this.employeeStore;
+            }
+        }
+
+        // Schedule selector: show only stores with shifts this week (plus primary)
+        const scheduleRow = document.getElementById('my-store-row');
+        const scheduleSelect = document.getElementById('my-store-select');
+        if (scheduleRow && scheduleSelect) {
+            const primary = this.currentUser?.primaryStore || stores[0];
+            const storesWithShifts = stores.filter(storeId => {
+                const schedule = DataManager.getScheduleForWeek(weekKey, storeId);
+                const has = DateUtils.DAY_KEYS.some(dayKey => (schedule?.shifts?.[dayKey] || []).some(s => s.employeeId === this.currentUser?.id));
+                return has;
+            });
+
+            const visibleStores = Array.from(new Set([primary, ...storesWithShifts])).filter(Boolean);
+
+            if (visibleStores.length <= 1) {
+                scheduleRow.style.display = 'none';
+            } else {
+                scheduleRow.style.display = 'flex';
+                scheduleSelect.innerHTML = visibleStores.map(id => `<option value="${id}">${DataManager.getStoreName(id)}</option>`).join('');
+                if (!visibleStores.includes(this.employeeStore)) this.employeeStore = primary;
+                scheduleSelect.value = this.employeeStore;
+            }
+        }
+    },
+
 
     handleLogin() {
         const selectValue = document.getElementById('employee-select').value;
@@ -175,9 +980,47 @@ const App = {
 
         this.currentUser = employee;
         DataManager.setCurrentUser(employee);
-        document.getElementById('current-user-name').textContent = employee.name;
-        this.showScreen('availability-screen');
+
+        const stores = this.getUserStores();
+        this.employeeStore = employee.primaryStore || employee.store || stores[0] || 'fresh_fries';
+        localStorage.setItem('freshshift_employee_store', this.employeeStore);
+
+        this.showScreen('dashboard-screen');
         this.showToast(`Hallo ${employee.name}!`, 'success');
+    },
+
+    handleAdminLogin() {
+        const password = document.getElementById('admin-password').value;
+        const errorEl = document.getElementById('admin-error');
+        
+        // Check password
+        if (password !== 'zabi4886093') {
+            errorEl.textContent = 'Falsches Passwort. Bitte erneut versuchen.';
+            document.getElementById('admin-password').value = '';
+            document.getElementById('admin-password').focus();
+            return;
+        }
+        
+        errorEl.textContent = '';
+        document.getElementById('admin-password').value = '';
+        DataManager.setAdminSession();
+        this.showScreen('admin-screen');
+        this.showToast('Willkommen im Admin-Bereich!', 'success');
+    },
+
+    handleLoginToggle(btn) {
+        const type = btn.dataset.type;
+        
+        // Update toggle buttons
+        document.querySelectorAll('.login-toggle-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        
+        // Show corresponding section
+        document.querySelectorAll('.login-section').forEach(s => s.classList.remove('active'));
+        document.getElementById(`${type}-login`).classList.add('active');
+        
+        // Clear any errors
+        document.getElementById('admin-error').textContent = '';
     },
 
     logout() {
@@ -185,6 +1028,23 @@ const App = {
         DataManager.clearCurrentUser();
         document.getElementById('employee-select').value = '';
         this.showScreen('login-screen');
+        this.resetLoginForm();
+    },
+
+    adminLogout() {
+        DataManager.clearCurrentUser();
+        this.showScreen('login-screen');
+        this.resetLoginForm();
+    },
+
+    resetLoginForm() {
+        // Reset to employee login
+        document.querySelectorAll('.login-toggle-btn').forEach(b => b.classList.remove('active'));
+        document.querySelector('.login-toggle-btn[data-type="employee"]').classList.add('active');
+        document.querySelectorAll('.login-section').forEach(s => s.classList.remove('active'));
+        document.getElementById('employee-login').classList.add('active');
+        document.getElementById('admin-error').textContent = '';
+        document.getElementById('admin-password').value = '';
     },
 
     // ===========================
@@ -257,38 +1117,44 @@ const App = {
     },
 
     // ===========================
-    // Notifications (Admin)
+    // Report Early Leave (Employee)
+    // ===========================
+    submitEarlyReport() {
+        if (!this.currentUser) {
+            this.showToast('Bitte melde dich zuerst an.', 'error');
+            return;
+        }
+
+        const minutes = document.getElementById('early-minutes').value;
+        const reason = document.getElementById('early-reason').value;
+
+        const notification = {
+            id: Date.now().toString(),
+            type: 'early',
+            employeeId: this.currentUser.id,
+            employeeName: this.currentUser.name,
+            message: `Geht ${minutes} Minuten früher`,
+            reason: reason || null,
+            timestamp: new Date().toISOString(),
+            read: false
+        };
+
+        DataManager.addNotification(notification);
+        
+        this.hideModals();
+        document.getElementById('early-reason').value = '';
+        this.showToast('Meldung gesendet! Die Chefs werden benachrichtigt.', 'success');
+    },
+
+    // ===========================
+    // Notifications (Admin) - Updated for new structure
     // ===========================
     updateNotificationBadge() {
-        const notifications = DataManager.getUnreadNotifications();
-        const badge = document.getElementById('notification-badge');
-        const count = document.getElementById('notification-count');
-        const panel = document.getElementById('notifications-panel');
-        
-        if (notifications.length > 0) {
-            badge.style.display = 'block';
-            count.textContent = notifications.length;
-            panel.style.display = 'block';
-            this.renderNotificationsList(notifications);
-        } else {
-            badge.style.display = 'none';
-            panel.style.display = 'none';
-        }
+        this.updateAdminNotifications();
     },
 
     renderNotificationsList(notifications) {
-        const list = document.getElementById('notifications-list');
-        
-        list.innerHTML = notifications.map(n => `
-            <div class="notification-item">
-                <span class="notification-icon">⏰</span>
-                <div class="notification-content">
-                    <div class="notification-title">${n.employeeName}: ${n.message}</div>
-                    ${n.reason ? `<div class="notification-reason">Grund: ${n.reason}</div>` : ''}
-                    <div class="notification-time">${this.formatTimestamp(n.timestamp)}</div>
-                </div>
-            </div>
-        `).join('');
+        // This is now handled by updateAdminNotifications
     },
 
     formatTimestamp(timestamp) {
@@ -298,13 +1164,13 @@ const App = {
     },
 
     toggleNotifications() {
-        const panel = document.getElementById('notifications-panel');
-        panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+        const card = document.getElementById('notifications-card');
+        card.style.display = card.style.display === 'none' ? 'block' : 'none';
     },
 
     clearNotifications() {
         DataManager.markAllNotificationsRead();
-        this.updateNotificationBadge();
+        this.updateAdminNotifications();
         this.showToast('Alle Meldungen als gelesen markiert.', 'success');
     },
 
@@ -317,8 +1183,10 @@ const App = {
         const dates = DateUtils.getWeekDates(this.currentWeek);
         const weekKey = DateUtils.getWeekKey(this.currentWeek);
         
-        const existingAvail = this.currentUser ? 
-            DataManager.getEmployeeAvailability(this.currentUser.id, weekKey) : null;
+        this.ensureEmployeeStoreSelectors(weekKey);
+
+        const existingAvail = this.currentUser ?
+            DataManager.getEmployeeAvailability(this.currentUser.id, weekKey, this.employeeStore) : null;
 
         container.innerHTML = '';
 
@@ -346,11 +1214,11 @@ const App = {
                 <div class="time-inputs" id="${dayKey}-times" style="${!existing.available ? 'display:none' : ''}">
                     <div class="time-group">
                         <label>Von:</label>
-                        <input type="time" name="${dayKey}_start" value="${existing.start || '10:00'}">
+                        <input type="text" name="${dayKey}_start" value="${existing.start || '10:00'}" pattern="[0-2][0-9]:[0-5][0-9]" placeholder="HH:MM" class="time-input-24h">
                     </div>
                     <div class="time-group">
                         <label>Bis:</label>
-                        <input type="time" name="${dayKey}_end" value="${existing.end || '20:00'}">
+                        <input type="text" name="${dayKey}_end" value="${existing.end || '20:00'}" pattern="[0-2][0-9]:[0-5][0-9]" placeholder="HH:MM" class="time-input-24h">
                     </div>
                 </div>
                 <div class="day-notes" id="${dayKey}-notes" style="${!existing.available ? 'display:none' : ''}">
@@ -400,6 +1268,7 @@ const App = {
         const availability = {
             employeeId: this.currentUser.id,
             weekKey: weekKey,
+            storeId: this.employeeStore,
             days: days,
             notes: document.getElementById('general-notes').value,
             submittedAt: new Date().toISOString()
@@ -415,18 +1284,23 @@ const App = {
     renderMyScheduleSection() {
         this.updateWeekDisplay();
         const weekKey = DateUtils.getWeekKey(this.currentWeek);
-        const schedule = DataManager.getScheduleForWeek(weekKey);
+        this.ensureEmployeeStoreSelectors(weekKey);
+
+        const schedule = DataManager.getScheduleForWeek(weekKey, this.employeeStore);
         const dates = DateUtils.getWeekDates(this.currentWeek);
+
         
         const statusContainer = document.getElementById('schedule-status');
         const contentContainer = document.getElementById('my-schedule-content');
         const summaryContainer = document.getElementById('weekly-summary');
 
+        const storeName = DataManager.getStoreName(this.employeeStore);
+
         if (!schedule) {
             statusContainer.className = 'schedule-status pending';
             statusContainer.innerHTML = `
                 <h3>Kein Plan vorhanden</h3>
-                <p>Für diese Woche wurde noch kein Schichtplan erstellt.</p>
+                <p>${storeName}: Für diese Woche wurde noch kein Schichtplan erstellt.</p>
             `;
             contentContainer.innerHTML = '';
             summaryContainer.innerHTML = '';
@@ -438,13 +1312,13 @@ const App = {
             statusContainer.className = 'schedule-status released';
             statusContainer.innerHTML = `
                 <h3>Plan freigegeben</h3>
-                <p>Freigegeben am ${new Date(schedule.releasedAt).toLocaleDateString('de-DE')}</p>
+                <p>${storeName} · Freigegeben am ${new Date(schedule.releasedAt).toLocaleDateString('de-DE')}</p>
             `;
         } else {
             statusContainer.className = 'schedule-status pending';
             statusContainer.innerHTML = `
                 <h3>Vorläufiger Plan</h3>
-                <p>Dieser Plan wurde noch nicht freigegeben.</p>
+                <p>${storeName} · Dieser Plan wurde noch nicht freigegeben.</p>
             `;
         }
 
@@ -519,57 +1393,27 @@ const App = {
     },
 
     // ===========================
-    // Admin View
+    // Admin View (Planner Page)
     // ===========================
     renderAdminView() {
         this.updateWeekDisplay();
-        this.renderAvailabilityOverview();
         this.renderScheduleEditor();
         this.renderWeekDeviations();
         this.updateReleaseButton();
-        this.updateNotificationBadge();
     },
 
+    // This is now handled by renderAdminAvailability() on separate page
     renderAvailabilityOverview() {
-        const table = document.getElementById('availability-table');
-        const weekKey = DateUtils.getWeekKey(this.currentWeek);
-        const dates = DateUtils.getWeekDates(this.currentWeek);
-        const employees = DataManager.getEmployees();
-        const availabilities = DataManager.getAvailabilityForWeek(weekKey);
-
-        // Header
-        let html = '<thead><tr><th class="name-header">Name</th>';
-        DateUtils.DAY_KEYS.forEach((dayKey, index) => {
-            html += `<th>${DateUtils.DAYS_SHORT[index]}<br><small>${DateUtils.formatDate(dates[index])}</small></th>`;
-        });
-        html += '</tr></thead><tbody>';
-
-        // Rows
-        employees.forEach(emp => {
-            const avail = availabilities.find(a => a.employeeId === emp.id);
-            html += `<tr><td class="name-cell">${emp.name}</td>`;
-            
-            DateUtils.DAY_KEYS.forEach(dayKey => {
-                const day = avail?.days?.[dayKey];
-                if (day?.available) {
-                    html += `<td class="available-cell">${day.start}–${day.end}</td>`;
-                } else {
-                    html += `<td class="unavailable-cell">–</td>`;
-                }
-            });
-            html += '</tr>';
-        });
-
-        html += '</tbody>';
-        table.innerHTML = html;
+        // Legacy - kept for compatibility but redirects to new function
+        this.renderAdminAvailability();
     },
 
     renderScheduleEditor() {
         const table = document.getElementById('schedule-table');
         const weekKey = DateUtils.getWeekKey(this.currentWeek);
         const dates = DateUtils.getWeekDates(this.currentWeek);
-        const employees = DataManager.getEmployees();
-        const schedule = DataManager.getScheduleForWeek(weekKey);
+        const employees = DataManager.getEmployees().filter(e => (e.stores || []).includes(this.adminStore));
+        const schedule = DataManager.getScheduleForWeek(weekKey, this.adminStore);
 
         // Header
         let html = '<thead><tr><th>Name</th>';
@@ -583,10 +1427,35 @@ const App = {
             html += `<tr><td class="name-cell">${emp.name}</td>`;
             
             DateUtils.DAY_KEYS.forEach((dayKey, dayIndex) => {
+                const dayDate = dates[dayIndex];
                 const dayShifts = schedule?.shifts?.[dayKey] || [];
                 const shift = dayShifts.find(s => s.employeeId === emp.id);
                 
-                if (shift) {
+                // Check if employee is absent on this day
+                const absence = DataManager.getEmployeeAbsenceForDate(emp.id, dayDate);
+                
+                if (absence) {
+                    // Employee is absent - show absence badge instead of shift cell
+                    const absenceType = absence.type;
+                    let cellClass = 'shift-cell cell-absent';
+                    let badgeClass = 'vacation';
+                    let badgeText = 'Urlaub';
+                    
+                    if (absenceType === 'krank') {
+                        cellClass = 'shift-cell cell-sick';
+                        badgeClass = 'sick';
+                        badgeText = 'Krank';
+                    } else if (absenceType === 'sonstiges') {
+                        badgeClass = 'other';
+                        badgeText = 'Abwesend';
+                    }
+                    
+                    html += `<td class="${cellClass}" 
+                        onclick="App.openShiftModal('${emp.id}', '${dayKey}', ${dayIndex})"
+                        title="${absence.note || badgeText}">
+                        <span class="absence-cell-badge ${badgeClass}">${badgeText}</span>
+                    </td>`;
+                } else if (shift) {
                     // Check for deviations
                     let cellClass = 'shift-cell has-shift';
                     let deviationHtml = '';
@@ -617,12 +1486,26 @@ const App = {
 
         html += '</tbody>';
         table.innerHTML = html;
+
+        const printWeek = document.getElementById('print-week');
+        if (printWeek) {
+            printWeek.textContent = `${DateUtils.formatWeekDisplay(this.currentWeek)} · ${DataManager.getStoreName(this.adminStore)}`;
+        }
     },
 
+    printSchedule() {
+        const printWeek = document.getElementById('print-week');
+        if (printWeek) {
+            printWeek.textContent = `${DateUtils.formatWeekDisplay(this.currentWeek)} · ${DataManager.getStoreName(this.adminStore)}`;
+        }
+        window.print();
+    },
+ 
     renderWeekDeviations() {
         const container = document.getElementById('week-deviations');
         const weekKey = DateUtils.getWeekKey(this.currentWeek);
-        const schedule = DataManager.getScheduleForWeek(weekKey);
+        const schedule = DataManager.getScheduleForWeek(weekKey, this.adminStore);
+
         
         if (!schedule) {
             container.innerHTML = '<p class="empty-state">Keine Schichten eingetragen.</p>';
@@ -670,21 +1553,36 @@ const App = {
         const weekKey = DateUtils.getWeekKey(this.currentWeek);
         const dates = DateUtils.getWeekDates(this.currentWeek);
         const employee = DataManager.getEmployee(employeeId);
-        const availabilities = DataManager.getAvailabilityForWeek(weekKey);
-        const schedule = DataManager.getScheduleForWeek(weekKey);
+        const availabilities = DataManager.getAvailabilityForWeek(weekKey, this.adminStore);
+        const schedule = DataManager.getScheduleForWeek(weekKey, this.adminStore);
+        const dayDate = dates[dayIndex];
 
         this.currentEditCell = { employeeId, dayKey, dayIndex };
 
         // Set day info
-        document.getElementById('modal-day-info').innerHTML = 
-            `<strong>${employee.name}</strong> – ${DateUtils.DAYS[dayIndex]}, ${DateUtils.formatDate(dates[dayIndex])}`;
+        let dayInfoHtml = `<strong>${employee.name}</strong> – ${DateUtils.DAYS[dayIndex]}, ${DateUtils.formatDate(dates[dayIndex])}`;
+        
+        // Check if employee is absent
+        const absence = DataManager.getEmployeeAbsenceForDate(employeeId, dayDate);
+        if (absence) {
+            const typeLabel = absence.type === 'urlaub' ? 'Urlaub' : 
+                             absence.type === 'krank' ? 'Krank' : 'Abwesend';
+            dayInfoHtml += `<div class="modal-absence-warning">⚠️ ${employee.name} ist an diesem Tag abwesend (${typeLabel}${absence.note ? ': ' + absence.note : ''})</div>`;
+        }
+        
+        document.getElementById('modal-day-info').innerHTML = dayInfoHtml;
 
         // Show availability
         const availableList = document.getElementById('available-list');
-        const employeeAvail = availabilities.find(a => a.employeeId === employeeId);
+        const employeeAvail = DataManager.getEmployeeAvailability(employeeId, weekKey, this.adminStore) || availabilities.find(a => a.employeeId === employeeId);
         const dayAvail = employeeAvail?.days?.[dayKey];
 
-        if (dayAvail?.available) {
+        if (absence) {
+            // Employee is absent - show warning instead of availability
+            const typeLabel = absence.type === 'urlaub' ? 'im Urlaub' : 
+                             absence.type === 'krank' ? 'krank' : 'abwesend';
+            availableList.innerHTML = `<div class="no-available" style="color: #b91c1c;">🚫 ${employee.name} ist ${typeLabel}</div>`;
+        } else if (dayAvail?.available) {
             availableList.innerHTML = `
                 <div class="available-employee" onclick="App.quickAssign('${dayAvail.start}', '${dayAvail.end}')">
                     <span class="name">Verfügbar</span>
@@ -741,10 +1639,11 @@ const App = {
         }
 
         // Get or create schedule
-        let schedule = DataManager.getScheduleForWeek(weekKey);
+        let schedule = DataManager.getScheduleForWeek(weekKey, this.adminStore);
         if (!schedule) {
             schedule = {
                 weekKey: weekKey,
+                storeId: this.adminStore,
                 shifts: {},
                 released: false
             };
@@ -803,6 +1702,7 @@ const App = {
 
         schedule.shifts[dayKey].push(shift);
 
+        schedule.storeId = this.adminStore;
         DataManager.saveSchedule(schedule);
         this.hideModals();
         this.renderScheduleEditor();
@@ -816,10 +1716,11 @@ const App = {
 
         const { employeeId, dayKey } = this.currentEditCell;
         const weekKey = DateUtils.getWeekKey(this.currentWeek);
-        let schedule = DataManager.getScheduleForWeek(weekKey);
+        let schedule = DataManager.getScheduleForWeek(weekKey, this.adminStore);
 
         if (schedule?.shifts?.[dayKey]) {
             schedule.shifts[dayKey] = schedule.shifts[dayKey].filter(s => s.employeeId !== employeeId);
+            schedule.storeId = this.adminStore;
             DataManager.saveSchedule(schedule);
         }
 
@@ -831,10 +1732,11 @@ const App = {
 
     saveSchedule() {
         const weekKey = DateUtils.getWeekKey(this.currentWeek);
-        let schedule = DataManager.getScheduleForWeek(weekKey);
+        let schedule = DataManager.getScheduleForWeek(weekKey, this.adminStore);
         
         if (schedule) {
             schedule.savedAt = new Date().toISOString();
+            schedule.storeId = this.adminStore;
             DataManager.saveSchedule(schedule);
             this.showToast('Plan gespeichert!', 'success');
             this.updateReleaseButton();
@@ -845,14 +1747,193 @@ const App = {
 
     releaseSchedule() {
         const weekKey = DateUtils.getWeekKey(this.currentWeek);
-        DataManager.releaseSchedule(weekKey);
+        DataManager.releaseSchedule(weekKey, this.adminStore);
         this.updateReleaseButton();
         this.showToast('Plan freigegeben! Mitarbeiter können ihn jetzt sehen.', 'success');
     },
 
+     pendingCopyContext: null,
+
+     copyLastWeek() {
+         // Get last week's date
+         const lastWeekDate = new Date(this.currentWeek);
+         lastWeekDate.setDate(lastWeekDate.getDate() - 7);
+
+         const lastWeekKey = DateUtils.getWeekKey(lastWeekDate);
+         const currentWeekKey = DateUtils.getWeekKey(this.currentWeek);
+
+         // Check if last week has a schedule
+         const lastWeekSchedule = DataManager.getScheduleForWeek(lastWeekKey, this.adminStore);
+
+         if (!lastWeekSchedule || !lastWeekSchedule.shifts) {
+             this.showToast('Keine Schichten in der letzten Woche gefunden.', 'warning');
+             return;
+         }
+
+         // Check if current week already has shifts
+         const currentSchedule = DataManager.getScheduleForWeek(currentWeekKey, this.adminStore);
+         if (currentSchedule && currentSchedule.shifts && Object.keys(currentSchedule.shifts).length > 0) {
+             if (!confirm('Diese Woche hat bereits Schichten. Möchtest du sie überschreiben?')) {
+                 return;
+             }
+         }
+
+         const dates = DateUtils.getWeekDates(this.currentWeek);
+         const currentAvailabilities = DataManager.getAvailabilityForWeek(currentWeekKey, this.adminStore);
+
+         const conflicts = [];
+         DateUtils.DAY_KEYS.forEach((dayKey, dayIndex) => {
+             const dayDate = dates[dayIndex];
+             const dayShifts = lastWeekSchedule.shifts[dayKey] || [];
+
+             dayShifts.forEach(shift => {
+                 const employee = DataManager.getEmployee(shift.employeeId);
+                 const employeeName = employee?.name || shift.employeeName || 'Unbekannt';
+
+                 const absence = DataManager.getEmployeeAbsenceForDate(shift.employeeId, dayDate);
+                 if (absence) {
+                     const typeLabel = absence.type === 'urlaub' ? 'Urlaub' : absence.type === 'krank' ? 'Krank' : 'Abwesend';
+                     conflicts.push({
+                         kind: 'absence',
+                         employeeId: shift.employeeId,
+                         employeeName,
+                         dayIndex,
+                         dayKey,
+                         date: DateUtils.formatDate(dayDate),
+                         detail: `${typeLabel}${absence.note ? ' – ' + absence.note : ''}`
+                     });
+                 }
+
+                 const avail = currentAvailabilities.find(a => a.employeeId === shift.employeeId);
+                 const dayAvail = avail?.days?.[dayKey];
+                 if (!dayAvail || !dayAvail.available) {
+                     conflicts.push({
+                         kind: 'availability',
+                         employeeId: shift.employeeId,
+                         employeeName,
+                         dayIndex,
+                         dayKey,
+                         date: DateUtils.formatDate(dayDate),
+                         detail: 'Keine Verfügbarkeit'
+                     });
+                 }
+             });
+         });
+
+         this.pendingCopyContext = {
+             lastWeekKey,
+             currentWeekKey,
+             lastWeekSchedule,
+             dates,
+             conflicts
+         };
+
+         const summary = document.getElementById('copy-week-summary');
+         if (summary) {
+             const conflictCount = conflicts.length;
+             summary.textContent = conflictCount === 0
+                 ? 'Keine Konflikte gefunden. Du kannst alles kopieren.'
+                 : `Gefundene Konflikte: ${conflictCount}. Du kannst ohne Konflikte kopieren oder trotzdem alles übernehmen.`;
+         }
+
+         const list = document.getElementById('copy-week-conflicts');
+         if (list) {
+             if (conflicts.length === 0) {
+                 list.innerHTML = '<div class="empty-state">Keine Konflikte 🎉</div>';
+             } else {
+                 list.innerHTML = conflicts.slice(0, 30).map(c => {
+                     const icon = c.kind === 'absence' ? '🚫' : '🕒';
+                     const tag = c.kind === 'absence' ? 'Abwesenheit' : 'Verfügbarkeit';
+                     return `
+                         <div class="conflict-item">
+                             <div class="conflict-icon">${icon}</div>
+                             <div class="conflict-main">
+                                 <div class="conflict-title">${c.employeeName} – ${DateUtils.DAYS_SHORT[c.dayIndex]} (${c.date})</div>
+                                 <div class="conflict-sub">${c.detail}</div>
+                             </div>
+                             <div class="conflict-tag">${tag}</div>
+                         </div>
+                     `;
+                 }).join('') + (conflicts.length > 30 ? `<div class="helper-text">+ ${conflicts.length - 30} weitere Konflikte…</div>` : '');
+             }
+         }
+
+         this.showModal('copy-week-modal');
+     },
+
+     applyCopyWeek(skipConflicts) {
+         if (!this.pendingCopyContext) return;
+
+         const { lastWeekKey, currentWeekKey, lastWeekSchedule, dates } = this.pendingCopyContext;
+
+         const newShifts = {};
+         const skipped = [];
+
+         DateUtils.DAY_KEYS.forEach((dayKey, dayIndex) => {
+             const dayDate = dates[dayIndex];
+             const dayShifts = lastWeekSchedule.shifts[dayKey] || [];
+             newShifts[dayKey] = [];
+
+             dayShifts.forEach(shift => {
+                 if (!skipConflicts) {
+                     newShifts[dayKey].push({
+                         employeeId: shift.employeeId,
+                         employeeName: shift.employeeName,
+                         start: shift.start,
+                         end: shift.end
+                     });
+                     return;
+                 }
+
+                 const absence = DataManager.getEmployeeAbsenceForDate(shift.employeeId, dayDate);
+                 if (absence) {
+                     skipped.push({ employeeId: shift.employeeId, dayIndex, reason: 'Abwesenheit' });
+                     return;
+                 }
+
+                 const avail = DataManager.getEmployeeAvailability(shift.employeeId, currentWeekKey, this.adminStore);
+                 const dayAvail = avail?.days?.[dayKey];
+                 if (!dayAvail || !dayAvail.available) {
+                     skipped.push({ employeeId: shift.employeeId, dayIndex, reason: 'Keine Verfügbarkeit' });
+                     return;
+                 }
+
+                 newShifts[dayKey].push({
+                     employeeId: shift.employeeId,
+                     employeeName: shift.employeeName,
+                     start: shift.start,
+                     end: shift.end
+                 });
+             });
+         });
+
+         const newSchedule = {
+             weekKey: currentWeekKey,
+             storeId: this.adminStore,
+             shifts: newShifts,
+             released: false,
+             copiedFrom: lastWeekKey,
+             createdAt: new Date().toISOString()
+         };
+
+         DataManager.saveSchedule(newSchedule);
+         this.hideModals();
+         this.pendingCopyContext = null;
+
+         this.renderScheduleEditor();
+         this.updateReleaseButton();
+
+         if (skipConflicts && skipped.length > 0) {
+             this.showToast(`${skipped.length} Schichten wegen Konflikten übersprungen.`, 'warning');
+         } else {
+             this.showToast('Schichten von letzter Woche kopiert!', 'success');
+         }
+     },
+
+
     updateReleaseButton() {
         const weekKey = DateUtils.getWeekKey(this.currentWeek);
-        const schedule = DataManager.getScheduleForWeek(weekKey);
+        const schedule = DataManager.getScheduleForWeek(weekKey, this.adminStore);
         const btn = document.getElementById('release-schedule');
 
         if (!schedule) {
@@ -872,8 +1953,9 @@ const App = {
     // ===========================
     renderMonthOverview() {
         const tbody = document.getElementById('month-table-body');
-        const employees = DataManager.getEmployees();
-        const stats = DataManager.getMonthStats(this.currentMonth);
+        const employees = DataManager.getEmployees().filter(e => (e.stores || []).includes(this.adminStore || 'fresh_fries'));
+        const stats = DataManager.getMonthStats(this.currentMonth, this.adminStore || 'fresh_fries');
+
         
         tbody.innerHTML = employees.map(emp => {
             const empStats = stats[emp.id] || { 
@@ -907,38 +1989,396 @@ const App = {
         const container = document.getElementById('employees-list');
         const employees = DataManager.getEmployees();
 
-        container.innerHTML = employees.map(emp => `
-            <div class="employee-card">
-                <div class="employee-info">
-                    <div class="employee-name">${emp.name}</div>
-                    <div class="employee-type">${emp.type === 'aushilfe' ? 'Aushilfe (max. 18h/Woche)' : 'Festangestellt'}</div>
+        const storeId = this.adminStore || 'fresh_fries';
+        const storeName = DataManager.getStoreName(storeId);
+
+        const storeEmployees = employees
+            .filter(e => (e.stores || []).includes(storeId))
+            .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'de'));
+
+        const cards = storeEmployees.map(emp => {
+            // Check for current/upcoming absences
+            const today = new Date();
+            const absences = DataManager.getAbsencesForEmployee(emp.id);
+            const currentAbsence = absences.find(a => {
+                const start = new Date(a.startDate);
+                const end = new Date(a.endDate);
+                return today >= start && today <= end;
+            });
+
+            let absenceBadge = '';
+            if (currentAbsence) {
+                const typeLabel = currentAbsence.type === 'urlaub' ? 'Urlaub' :
+                    currentAbsence.type === 'krank' ? 'Krank' : 'Abwesend';
+                const badgeClass = currentAbsence.type === 'krank' ? 'badge-sick' : 'badge-vacation';
+                absenceBadge = `<span class="absence-badge ${badgeClass}">${typeLabel}</span>`;
+            }
+
+            const stores = Array.isArray(emp.stores) && emp.stores.length > 0 ? emp.stores : [emp.primaryStore || emp.store || storeId];
+            const storeChips = stores.map(s => `<span class="store-chip">${DataManager.getStoreName(s)}</span>`).join('');
+
+            return `
+                <div class="employee-card ${currentAbsence ? 'employee-absent' : ''}">
+                    <div class="employee-info">
+                        <div class="employee-name-row">
+                            <span class="employee-name">${emp.name}</span>
+                            ${absenceBadge}
+                        </div>
+                        <div class="employee-meta">
+                            <div class="employee-stores">${storeChips}</div>
+                            <div class="employee-type">${emp.type === 'aushilfe' ? 'Aushilfe' : 'Festangestellt'}</div>
+                        </div>
+                    </div>
+                    <div class="employee-actions">
+                        <button class="btn btn-secondary btn-small" onclick="App.openAbsenceModal('${emp.id}')">
+                            <span class="btn-icon-inline">📅</span> Abwesenheit
+                        </button>
+                        <button class="btn btn-secondary btn-small btn-icon-only" onclick="App.openEditEmployeeModal('${emp.id}')">✎</button>
+                        <button class="btn btn-danger btn-small btn-icon-only" onclick="App.deleteEmployee('${emp.id}')">✕</button>
+                    </div>
                 </div>
-                <button class="btn btn-danger btn-small" onclick="App.deleteEmployee('${emp.id}')">Löschen</button>
+            `;
+        }).join('');
+
+        container.innerHTML = `
+            <div class="employees-store-section">
+                <div class="store-section-header">
+                    <h4>${storeName}</h4>
+                    <span class="store-count">${storeEmployees.length}</span>
+                </div>
+                ${cards || '<div class="empty-state">Keine Mitarbeiter</div>'}
             </div>
-        `).join('');
+        `;
+
+        // Render absences overview
+        this.renderAbsencesOverview();
+    },
+
+    renderAbsencesOverview() {
+        const container = document.getElementById('absences-overview-list');
+        const absences = DataManager.getAbsences();
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        // Filter to current and upcoming absences (next 30 days)
+        const futureDate = new Date(today);
+        futureDate.setDate(futureDate.getDate() + 30);
+        
+        const relevantAbsences = absences.filter(a => {
+            const endDate = new Date(a.endDate);
+            const startDate = new Date(a.startDate);
+            return endDate >= today && startDate <= futureDate;
+        }).sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
+        
+        if (relevantAbsences.length === 0) {
+            container.innerHTML = '<div class="empty-state">Keine Abwesenheiten eingetragen</div>';
+            return;
+        }
+        
+        container.innerHTML = relevantAbsences.map(absence => {
+            const employee = DataManager.getEmployee(absence.employeeId);
+            const startDate = new Date(absence.startDate);
+            const endDate = new Date(absence.endDate);
+            const isActive = today >= startDate && today <= endDate;
+            
+            const typeIcon = absence.type === 'urlaub' ? '🏖️' : 
+                            absence.type === 'krank' ? '🤒' : '📅';
+            const typeLabel = absence.type === 'urlaub' ? 'Urlaub' : 
+                             absence.type === 'krank' ? 'Krank' : 'Abwesend';
+            
+            const dateText = startDate.toISOString().split('T')[0] === endDate.toISOString().split('T')[0]
+                ? DateUtils.formatDate(startDate)
+                : `${DateUtils.formatDate(startDate)} – ${DateUtils.formatDate(endDate)}`;
+            
+            return `
+                <div class="absence-item ${isActive ? 'absence-active' : ''}" onclick="App.editAbsence('${absence.id}')">
+                    <span class="absence-icon">${typeIcon}</span>
+                    <div class="absence-info">
+                        <div class="absence-name">${employee?.name || 'Unbekannt'}</div>
+                        <div class="absence-dates">${typeLabel}: ${dateText}</div>
+                        ${absence.note ? `<div class="absence-note">${absence.note}</div>` : ''}
+                    </div>
+                    ${isActive ? '<span class="absence-status">Aktuell</span>' : ''}
+                </div>
+            `;
+        }).join('');
+    },
+
+    // ===========================
+    // Data (Backup / Import)
+    // ===========================
+    renderAdminDataPage() {
+        const status = document.getElementById('backup-status');
+        if (!status) return;
+
+        status.textContent = 'Export/Import lokal';
+    },
+
+    exportBackup() {
+        try {
+            const payload = DataManager.exportBackup();
+            const date = new Date(payload.exportedAt);
+            const yyyy = date.getFullYear();
+            const mm = String(date.getMonth() + 1).padStart(2, '0');
+            const dd = String(date.getDate()).padStart(2, '0');
+            const filename = `freshshift-backup-${yyyy}-${mm}-${dd}.json`;
+
+            const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+
+            const status = document.getElementById('backup-status');
+            if (status) status.textContent = `Export: ${yyyy}-${mm}-${dd}`;
+
+            this.showToast('Backup heruntergeladen.', 'success');
+        } catch (e) {
+            this.showToast(e?.message || 'Backup konnte nicht exportiert werden.', 'error');
+        }
+    },
+
+    importBackup() {
+        const input = document.getElementById('import-file');
+        const file = input?.files?.[0];
+        if (!file) {
+            this.showToast('Bitte zuerst eine JSON-Datei auswählen.', 'error');
+            return;
+        }
+
+        if (!confirm('Import überschreibt die aktuellen Daten auf diesem Gerät. Fortfahren?')) {
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = () => {
+            try {
+                const text = String(reader.result || '');
+                const payload = JSON.parse(text);
+                DataManager.importBackup(payload);
+
+                this.showToast('Backup importiert. Seite wird neu geladen…', 'success');
+                setTimeout(() => window.location.reload(), 600);
+            } catch (e) {
+                this.showToast(e?.message || 'Import fehlgeschlagen (ungültige Datei).', 'error');
+            }
+        };
+        reader.onerror = () => this.showToast('Datei konnte nicht gelesen werden.', 'error');
+        reader.readAsText(file);
+    },
+
+    currentEditAbsence: null,
+
+    openAbsenceModal(employeeId, absenceId = null) {
+        const employee = DataManager.getEmployee(employeeId);
+        if (!employee) return;
+        
+        document.getElementById('absence-employee-info').innerHTML = `<strong>${employee.name}</strong>`;
+        
+        // Set default dates
+        const today = new Date().toISOString().split('T')[0];
+        document.getElementById('absence-start').value = today;
+        document.getElementById('absence-end').value = today;
+        document.getElementById('absence-type').value = 'urlaub';
+        document.getElementById('absence-note').value = '';
+        document.getElementById('delete-absence').style.display = 'none';
+        document.getElementById('absence-modal-title').textContent = 'Abwesenheit eintragen';
+        
+        this.currentEditAbsence = { employeeId, absenceId: null };
+        this.showModal('absence-modal');
+    },
+
+    editAbsence(absenceId) {
+        const absence = DataManager.getAbsence(absenceId);
+        if (!absence) return;
+        
+        const employee = DataManager.getEmployee(absence.employeeId);
+        document.getElementById('absence-employee-info').innerHTML = `<strong>${employee?.name || 'Unbekannt'}</strong>`;
+        
+        document.getElementById('absence-start').value = absence.startDate;
+        document.getElementById('absence-end').value = absence.endDate;
+        document.getElementById('absence-type').value = absence.type;
+        document.getElementById('absence-note').value = absence.note || '';
+        document.getElementById('delete-absence').style.display = 'block';
+        document.getElementById('absence-modal-title').textContent = 'Abwesenheit bearbeiten';
+        
+        this.currentEditAbsence = { employeeId: absence.employeeId, absenceId };
+        this.showModal('absence-modal');
+    },
+
+    saveAbsence() {
+        if (!this.currentEditAbsence) return;
+        
+        const startDate = document.getElementById('absence-start').value;
+        const endDate = document.getElementById('absence-end').value;
+        const type = document.getElementById('absence-type').value;
+        const note = document.getElementById('absence-note').value.trim();
+        
+        if (!startDate || !endDate) {
+            this.showToast('Bitte Datum eingeben.', 'error');
+            return;
+        }
+        
+        if (new Date(startDate) > new Date(endDate)) {
+            this.showToast('Enddatum muss nach Startdatum sein.', 'error');
+            return;
+        }
+        
+        const absenceData = {
+            employeeId: this.currentEditAbsence.employeeId,
+            startDate,
+            endDate,
+            type,
+            note: note || null
+        };
+        
+        if (this.currentEditAbsence.absenceId) {
+            // Update existing
+            absenceData.id = this.currentEditAbsence.absenceId;
+            DataManager.updateAbsence(absenceData);
+            this.showToast('Abwesenheit aktualisiert.', 'success');
+        } else {
+            // Create new
+            DataManager.addAbsence(absenceData);
+            this.showToast('Abwesenheit eingetragen.', 'success');
+        }
+        
+        this.hideModals();
+        this.currentEditAbsence = null;
+        this.renderEmployeesTab();
+    },
+
+    deleteAbsence() {
+        if (!this.currentEditAbsence?.absenceId) return;
+        
+        if (confirm('Abwesenheit wirklich löschen?')) {
+            DataManager.deleteAbsence(this.currentEditAbsence.absenceId);
+            this.hideModals();
+            this.currentEditAbsence = null;
+            this.renderEmployeesTab();
+            this.showToast('Abwesenheit gelöscht.', 'success');
+        }
+    },
+
+    openAddEmployeeModal() {
+        document.getElementById('employee-modal-title').textContent = 'Neuer Mitarbeiter';
+        document.getElementById('save-new-employee').textContent = 'Hinzufügen';
+
+        document.getElementById('new-emp-id').value = '';
+        document.getElementById('new-emp-name').value = '';
+        document.getElementById('new-emp-type').value = 'aushilfe';
+
+        // Default store = current admin store
+        document.getElementById('store-fresh-fries').checked = (this.adminStore === 'fresh_fries');
+        document.getElementById('store-yes-fresh').checked = (this.adminStore === 'yes_fresh');
+        this.syncEmployeeStoreOptions();
+
+        this.showModal('add-employee-modal');
+    },
+
+    openEditEmployeeModal(employeeId) {
+        const emp = DataManager.getEmployee(employeeId);
+        if (!emp) return;
+
+        document.getElementById('employee-modal-title').textContent = 'Mitarbeiter bearbeiten';
+        document.getElementById('save-new-employee').textContent = 'Speichern';
+
+        document.getElementById('new-emp-id').value = emp.id;
+        document.getElementById('new-emp-name').value = emp.name || '';
+        document.getElementById('new-emp-type').value = emp.type || 'aushilfe';
+
+        const stores = Array.isArray(emp.stores) && emp.stores.length > 0 ? emp.stores : [emp.primaryStore || emp.store || 'fresh_fries'];
+        document.getElementById('store-fresh-fries').checked = stores.includes('fresh_fries');
+        document.getElementById('store-yes-fresh').checked = stores.includes('yes_fresh');
+        this.syncEmployeeStoreOptions(emp.primaryStore || emp.store || stores[0]);
+
+        this.showModal('add-employee-modal');
+    },
+
+    syncEmployeeStoreOptions(preferPrimary) {
+        const fresh = document.getElementById('store-fresh-fries')?.checked;
+        const yes = document.getElementById('store-yes-fresh')?.checked;
+
+        const stores = [];
+        if (fresh) stores.push('fresh_fries');
+        if (yes) stores.push('yes_fresh');
+
+        const select = document.getElementById('new-emp-primary-store');
+        const group = document.getElementById('new-emp-primary-store-group');
+        if (!select || !group) return;
+
+        // Only show primary store choice for hybrid workers
+        if (stores.length <= 1) {
+            group.style.display = 'none';
+            select.innerHTML = stores.length === 1
+                ? `<option value="${stores[0]}">${DataManager.getStoreName(stores[0])}</option>`
+                : '';
+            select.value = stores[0] || 'fresh_fries';
+            return;
+        }
+
+        group.style.display = 'block';
+        select.innerHTML = stores.map(id => `<option value="${id}">${DataManager.getStoreName(id)}</option>`).join('');
+
+        const wanted = preferPrimary || this.adminStore;
+        if (stores.includes(wanted)) {
+            select.value = wanted;
+        } else {
+            select.value = stores[0];
+        }
     },
 
     saveNewEmployee() {
+        const id = document.getElementById('new-emp-id').value.trim();
         const name = document.getElementById('new-emp-name').value.trim();
         const type = document.getElementById('new-emp-type').value;
+
+        const stores = [];
+        if (document.getElementById('store-fresh-fries').checked) stores.push('fresh_fries');
+        if (document.getElementById('store-yes-fresh').checked) stores.push('yes_fresh');
+
+        const primaryStore = stores.length === 1
+            ? stores[0]
+            : document.getElementById('new-emp-primary-store').value;
 
         if (!name) {
             this.showToast('Bitte Namen eingeben.', 'error');
             return;
         }
 
-        if (DataManager.getEmployeeByName(name)) {
+        if (stores.length === 0) {
+            this.showToast('Bitte mindestens ein Geschäft auswählen.', 'error');
+            return;
+        }
+
+        if (!stores.includes(primaryStore)) {
+            this.showToast('Hauptgeschäft muss in den ausgewählten Geschäften enthalten sein.', 'error');
+            return;
+        }
+
+        const existing = DataManager.getEmployeeByName(name);
+        if (existing && existing.id !== id) {
             this.showToast('Name existiert bereits.', 'error');
             return;
         }
 
-        DataManager.addEmployee({ name, store: 'fresh_fries', type });
+        if (id) {
+            DataManager.updateEmployee({ id, name, type, primaryStore, stores });
+            this.showToast(`${name} aktualisiert!`, 'success');
+        } else {
+            DataManager.addEmployee({ name, type, primaryStore, stores });
+            this.showToast(`${name} hinzugefügt!`, 'success');
+        }
+
         this.hideModals();
         this.renderEmployeesTab();
         this.renderAdminView();
         this.loadEmployeeDropdown();
-        document.getElementById('new-emp-name').value = '';
-        this.showToast(`${name} hinzugefügt!`, 'success');
     },
 
     deleteEmployee(id) {

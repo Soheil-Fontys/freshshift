@@ -1,0 +1,39 @@
+{
+  "name": "FreshShift - Schichtplaner",
+  "short_name": "FreshShift",
+  "description": "Schichtplaner für Fresh Fries Restaurant - Verfügbarkeiten eintragen und Schichtpläne verwalten",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0b5fa5",
+  "orientation": "portrait-primary",
+  "scope": "./",
+  "lang": "de-DE",
+  "categories": ["business", "productivity"],
+  "icons": [
+    {
+      "src": "./icons/pwa-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/pwa-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/pwa-icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "./icons/pwa-icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

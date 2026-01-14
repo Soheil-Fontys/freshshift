@@ -3,25 +3,161 @@
  */
 
 const DataManager = {
+    STORES: {
+        fresh_fries: { id: 'fresh_fries', name: 'Fresh Fries' },
+        yes_fresh: { id: 'yes_fresh', name: 'Yes Fresh' }
+    },
+
     KEYS: {
         EMPLOYEES: 'freshshift_employees',
         AVAILABILITIES: 'freshshift_availabilities',
         SCHEDULES: 'freshshift_schedules',
         CURRENT_USER: 'freshshift_current_user',
-        NOTIFICATIONS: 'freshshift_notifications'
+        NOTIFICATIONS: 'freshshift_notifications',
+        IS_ADMIN: 'freshshift_is_admin',
+        ABSENCES: 'freshshift_absences'
     },
 
-    // Initialize with Fresh Fries team
+    getStoreName(storeId) {
+        return this.STORES?.[storeId]?.name || storeId;
+    },
+
+    normalizeStoreId(storeId) {
+        return storeId || 'fresh_fries';
+    },
+
+    // Initialize / migrate data
     init() {
-        if (!this.getEmployees().length) {
-            const defaultEmployees = [
-                { id: '1', name: 'Zhulia', store: 'fresh_fries', type: 'festangestellt' },
-                { id: '2', name: 'Maria', store: 'fresh_fries', type: 'festangestellt' },
-                { id: '3', name: 'Vito', store: 'fresh_fries', type: 'aushilfe' },
-                { id: '4', name: 'Marzena', store: 'fresh_fries', type: 'festangestellt' },
-                { id: '5', name: 'Soheil', store: 'fresh_fries', type: 'aushilfe' }
-            ];
-            localStorage.setItem(this.KEYS.EMPLOYEES, JSON.stringify(defaultEmployees));
+        this.migrateEmployees();
+        this.seedDefaultEmployees();
+        this.migrateAvailabilities();
+        this.migrateSchedules();
+    },
+
+    seedDefaultEmployees() {
+        const existing = this.getEmployees();
+        const byName = new Map(existing.map(e => [String(e.name || '').toLowerCase(), e]));
+
+        const defaults = [
+            // Fresh Fries
+            { name: 'Zhulia', type: 'festangestellt', primaryStore: 'fresh_fries', stores: ['fresh_fries', 'yes_fresh'] },
+            { name: 'Maria', type: 'festangestellt', primaryStore: 'fresh_fries', stores: ['fresh_fries'] },
+            { name: 'Marzena', type: 'festangestellt', primaryStore: 'fresh_fries', stores: ['fresh_fries'] },
+            { name: 'Vito', type: 'aushilfe', primaryStore: 'fresh_fries', stores: ['fresh_fries', 'yes_fresh'] },
+            { name: 'Soheil', type: 'aushilfe', primaryStore: 'fresh_fries', stores: ['fresh_fries'] },
+
+            // Yes Fresh
+            { name: 'Leo', type: 'festangestellt', primaryStore: 'yes_fresh', stores: ['yes_fresh'] },
+            { name: 'Anna', type: 'festangestellt', primaryStore: 'yes_fresh', stores: ['yes_fresh'] },
+            { name: 'Kathi', type: 'festangestellt', primaryStore: 'yes_fresh', stores: ['yes_fresh'] },
+            { name: 'Albo', type: 'festangestellt', primaryStore: 'yes_fresh', stores: ['yes_fresh'] },
+            { name: 'Ouijdane', type: 'festangestellt', primaryStore: 'yes_fresh', stores: ['yes_fresh'] },
+            { name: 'Khanom', type: 'festangestellt', primaryStore: 'yes_fresh', stores: ['yes_fresh'] },
+            { name: 'Rayna', type: 'festangestellt', primaryStore: 'yes_fresh', stores: ['yes_fresh'] },
+            { name: 'Phyllis', type: 'festangestellt', primaryStore: 'yes_fresh', stores: ['yes_fresh'] }
+        ];
+
+        let changed = false;
+        defaults.forEach(d => {
+            const existingEmp = byName.get(d.name.toLowerCase());
+            if (!existingEmp) {
+                existing.push({
+                    id: Date.now().toString() + Math.random().toString(16).slice(2),
+                    name: d.name,
+                    type: d.type,
+                    primaryStore: d.primaryStore,
+                    stores: d.stores
+                });
+                changed = true;
+            } else {
+                // Ensure store metadata exists
+                if (!existingEmp.stores || !Array.isArray(existingEmp.stores) || existingEmp.stores.length === 0) {
+                    existingEmp.stores = [existingEmp.primaryStore || existingEmp.store || 'fresh_fries'];
+                    changed = true;
+                }
+                if (!existingEmp.primaryStore) {
+                    existingEmp.primaryStore = existingEmp.store || existingEmp.stores[0] || 'fresh_fries';
+                    changed = true;
+                }
+            }
+        });
+
+        if (changed) {
+            localStorage.setItem(this.KEYS.EMPLOYEES, JSON.stringify(existing));
+        }
+    },
+
+    migrateEmployees() {
+        const employees = this.getEmployees();
+        if (!employees.length) return;
+
+        let changed = false;
+        employees.forEach(emp => {
+            if (!emp) return;
+
+            // legacy: store: 'fresh_fries'
+            if (!emp.stores) {
+                const legacyStore = emp.store || emp.primaryStore || 'fresh_fries';
+                emp.stores = [legacyStore];
+                changed = true;
+            }
+
+            if (typeof emp.stores === 'string') {
+                emp.stores = [emp.stores];
+                changed = true;
+            }
+
+            if (!Array.isArray(emp.stores) || emp.stores.length === 0) {
+                emp.stores = [emp.store || 'fresh_fries'];
+                changed = true;
+            }
+
+            if (!emp.primaryStore) {
+                emp.primaryStore = emp.store || emp.stores[0] || 'fresh_fries';
+                changed = true;
+            }
+
+            // keep legacy store field but avoid relying on it
+        });
+
+        if (changed) {
+            localStorage.setItem(this.KEYS.EMPLOYEES, JSON.stringify(employees));
+        }
+    },
+
+    migrateAvailabilities() {
+        const availabilities = this.getAvailabilities();
+        if (!availabilities.length) return;
+
+        let changed = false;
+        availabilities.forEach(a => {
+            if (!a) return;
+            if (!a.storeId) {
+                a.storeId = 'fresh_fries';
+                changed = true;
+            }
+        });
+
+        if (changed) {
+            localStorage.setItem(this.KEYS.AVAILABILITIES, JSON.stringify(availabilities));
+        }
+    },
+
+    migrateSchedules() {
+        const schedules = this.getSchedules();
+        if (!schedules.length) return;
+
+        let changed = false;
+        schedules.forEach(s => {
+            if (!s) return;
+            if (!s.storeId) {
+                s.storeId = 'fresh_fries';
+                changed = true;
+            }
+        });
+
+        if (changed) {
+            localStorage.setItem(this.KEYS.SCHEDULES, JSON.stringify(schedules));
         }
     },
 
@@ -42,9 +178,32 @@ const DataManager = {
     addEmployee(employee) {
         const employees = this.getEmployees();
         employee.id = Date.now().toString();
+
+        const storeId = this.normalizeStoreId(employee.primaryStore || employee.store || (employee.stores?.[0]));
+        if (!employee.primaryStore) employee.primaryStore = storeId;
+        if (!employee.stores) employee.stores = [storeId];
+        if (typeof employee.stores === 'string') employee.stores = [employee.stores];
+
         employees.push(employee);
         localStorage.setItem(this.KEYS.EMPLOYEES, JSON.stringify(employees));
         return employee;
+    },
+
+    updateEmployee(employee) {
+        const employees = this.getEmployees();
+        const idx = employees.findIndex(e => e.id === employee.id);
+        if (idx === -1) return;
+
+        const storeId = this.normalizeStoreId(employee.primaryStore || employee.store || (employee.stores?.[0]));
+        employee.primaryStore = storeId;
+        employee.stores = Array.isArray(employee.stores) ? employee.stores : [storeId];
+        employee.stores = employee.stores.map(s => this.normalizeStoreId(s));
+        if (!employee.stores.includes(employee.primaryStore)) {
+            employee.stores.unshift(employee.primaryStore);
+        }
+
+        employees[idx] = { ...employees[idx], ...employee };
+        localStorage.setItem(this.KEYS.EMPLOYEES, JSON.stringify(employees));
     },
 
     deleteEmployee(id) {
@@ -58,21 +217,26 @@ const DataManager = {
         return data ? JSON.parse(data) : [];
     },
 
-    getAvailabilityForWeek(weekKey) {
-        return this.getAvailabilities().filter(a => a.weekKey === weekKey);
+    getAvailabilityForWeek(weekKey, storeId) {
+        const store = this.normalizeStoreId(storeId);
+        return this.getAvailabilities().filter(a => a.weekKey === weekKey && this.normalizeStoreId(a.storeId) === store);
     },
 
-    getEmployeeAvailability(employeeId, weekKey) {
+    getEmployeeAvailability(employeeId, weekKey, storeId) {
+        const store = this.normalizeStoreId(storeId);
         return this.getAvailabilities().find(
-            a => a.employeeId === employeeId && a.weekKey === weekKey
+            a => a.employeeId === employeeId && a.weekKey === weekKey && this.normalizeStoreId(a.storeId) === store
         );
     },
 
     saveAvailability(availability) {
         const availabilities = this.getAvailabilities();
+        availability.storeId = this.normalizeStoreId(availability.storeId);
+
         const existingIndex = availabilities.findIndex(
-            a => a.employeeId === availability.employeeId && a.weekKey === availability.weekKey
+            a => a.employeeId === availability.employeeId && a.weekKey === availability.weekKey && this.normalizeStoreId(a.storeId) === availability.storeId
         );
+
 
         if (existingIndex !== -1) {
             availabilities[existingIndex] = availability;
@@ -91,13 +255,17 @@ const DataManager = {
         return data ? JSON.parse(data) : [];
     },
 
-    getScheduleForWeek(weekKey) {
-        return this.getSchedules().find(s => s.weekKey === weekKey);
+    getScheduleForWeek(weekKey, storeId) {
+        const store = this.normalizeStoreId(storeId);
+        return this.getSchedules().find(s => s.weekKey === weekKey && this.normalizeStoreId(s.storeId) === store);
     },
 
     saveSchedule(schedule) {
         const schedules = this.getSchedules();
-        const existingIndex = schedules.findIndex(s => s.weekKey === schedule.weekKey);
+        schedule.storeId = this.normalizeStoreId(schedule.storeId);
+
+        const existingIndex = schedules.findIndex(s => s.weekKey === schedule.weekKey && this.normalizeStoreId(s.storeId) === schedule.storeId);
+
 
         if (existingIndex !== -1) {
             schedules[existingIndex] = schedule;
@@ -110,9 +278,11 @@ const DataManager = {
         return schedule;
     },
 
-    releaseSchedule(weekKey) {
+    releaseSchedule(weekKey, storeId) {
+        const store = this.normalizeStoreId(storeId);
         const schedules = this.getSchedules();
-        const schedule = schedules.find(s => s.weekKey === weekKey);
+        const schedule = schedules.find(s => s.weekKey === weekKey && this.normalizeStoreId(s.storeId) === store);
+
         if (schedule) {
             schedule.released = true;
             schedule.releasedAt = new Date().toISOString();
@@ -123,9 +293,11 @@ const DataManager = {
     },
 
     // Get schedules for a month
-    getSchedulesForMonth(year, month) {
+    getSchedulesForMonth(year, month, storeId) {
+        const store = this.normalizeStoreId(storeId);
         return this.getSchedules().filter(s => {
             if (!s.weekKey) return false;
+            if (this.normalizeStoreId(s.storeId) !== store) return false;
             const [y, w] = s.weekKey.split('-W');
             const weekDate = this.getDateFromWeek(parseInt(y), parseInt(w));
             return weekDate.getFullYear() === year && weekDate.getMonth() === month;
@@ -137,6 +309,81 @@ const DataManager = {
         const days = (week - 1) * 7;
         jan1.setDate(jan1.getDate() + days);
         return jan1;
+    },
+
+    // ===========================
+    // Absence Management (Urlaub/Krankheit)
+    // ===========================
+    getAbsences() {
+        const data = localStorage.getItem(this.KEYS.ABSENCES);
+        return data ? JSON.parse(data) : [];
+    },
+
+    getAbsence(id) {
+        return this.getAbsences().find(a => a.id === id);
+    },
+
+    getAbsencesForEmployee(employeeId) {
+        return this.getAbsences().filter(a => a.employeeId === employeeId);
+    },
+
+    getAbsencesForDate(date) {
+        const dateStr = date.toISOString().split('T')[0]; // YYYY-MM-DD
+        return this.getAbsences().filter(a => {
+            return dateStr >= a.startDate && dateStr <= a.endDate;
+        });
+    },
+
+    getAbsencesForDateRange(startDate, endDate) {
+        const start = startDate.toISOString().split('T')[0];
+        const end = endDate.toISOString().split('T')[0];
+        return this.getAbsences().filter(a => {
+            // Check if absence overlaps with the range
+            return a.startDate <= end && a.endDate >= start;
+        });
+    },
+
+    isEmployeeAbsent(employeeId, date) {
+        const dateStr = date.toISOString().split('T')[0];
+        return this.getAbsences().some(a => 
+            a.employeeId === employeeId && 
+            dateStr >= a.startDate && 
+            dateStr <= a.endDate
+        );
+    },
+
+    getEmployeeAbsenceForDate(employeeId, date) {
+        const dateStr = date.toISOString().split('T')[0];
+        return this.getAbsences().find(a => 
+            a.employeeId === employeeId && 
+            dateStr >= a.startDate && 
+            dateStr <= a.endDate
+        );
+    },
+
+    addAbsence(absence) {
+        const absences = this.getAbsences();
+        absence.id = Date.now().toString();
+        absence.createdAt = new Date().toISOString();
+        absences.push(absence);
+        localStorage.setItem(this.KEYS.ABSENCES, JSON.stringify(absences));
+        return absence;
+    },
+
+    updateAbsence(absence) {
+        const absences = this.getAbsences();
+        const index = absences.findIndex(a => a.id === absence.id);
+        if (index !== -1) {
+            absences[index] = { ...absences[index], ...absence };
+            localStorage.setItem(this.KEYS.ABSENCES, JSON.stringify(absences));
+            return absences[index];
+        }
+        return null;
+    },
+
+    deleteAbsence(id) {
+        const absences = this.getAbsences().filter(a => a.id !== id);
+        localStorage.setItem(this.KEYS.ABSENCES, JSON.stringify(absences));
     },
 
     // Notifications (for late arrivals etc.)
@@ -174,11 +421,13 @@ const DataManager = {
     },
 
     // Month Statistics
-    getMonthStats(date) {
+    getMonthStats(date, storeId) {
+        const store = this.normalizeStoreId(storeId);
         const year = date.getFullYear();
         const month = date.getMonth();
         const employees = this.getEmployees();
-        const schedules = this.getSchedules();
+        const schedules = this.getSchedules().filter(s => this.normalizeStoreId(s.storeId) === store);
+
         
         const stats = {};
         
@@ -248,6 +497,7 @@ const DataManager = {
     // Current User Session
     setCurrentUser(employee) {
         localStorage.setItem(this.KEYS.CURRENT_USER, JSON.stringify(employee));
+        localStorage.removeItem(this.KEYS.IS_ADMIN);
     },
 
     getCurrentUser() {
@@ -257,6 +507,72 @@ const DataManager = {
 
     clearCurrentUser() {
         localStorage.removeItem(this.KEYS.CURRENT_USER);
+        localStorage.removeItem(this.KEYS.IS_ADMIN);
+    },
+
+    // Admin Session
+    setAdminSession() {
+        localStorage.setItem(this.KEYS.IS_ADMIN, 'true');
+        localStorage.removeItem(this.KEYS.CURRENT_USER);
+    },
+
+    isAdminSession() {
+        return localStorage.getItem(this.KEYS.IS_ADMIN) === 'true';
+    },
+
+    // ===========================
+    // Backup / Restore
+    // ===========================
+    exportBackup() {
+        const dataKeys = [
+            this.KEYS.EMPLOYEES,
+            this.KEYS.AVAILABILITIES,
+            this.KEYS.SCHEDULES,
+            this.KEYS.NOTIFICATIONS,
+            this.KEYS.ABSENCES
+        ];
+
+        const data = {};
+        dataKeys.forEach(key => {
+            const raw = localStorage.getItem(key);
+            data[key] = raw ? JSON.parse(raw) : [];
+        });
+
+        return {
+            schemaVersion: 1,
+            app: 'freshshift',
+            exportedAt: new Date().toISOString(),
+            data
+        };
+    },
+
+    importBackup(payload) {
+        if (!payload || typeof payload !== 'object') {
+            throw new Error('Ungültiges Backup-Format.');
+        }
+        if (payload.schemaVersion !== 1 || payload.app !== 'freshshift') {
+            throw new Error('Backup-Version wird nicht unterstützt.');
+        }
+        if (!payload.data || typeof payload.data !== 'object') {
+            throw new Error('Backup enthält keine Daten.');
+        }
+
+        const allowed = new Set([
+            this.KEYS.EMPLOYEES,
+            this.KEYS.AVAILABILITIES,
+            this.KEYS.SCHEDULES,
+            this.KEYS.NOTIFICATIONS,
+            this.KEYS.ABSENCES
+        ]);
+
+        // Overwrite only app data, keep session keys intact
+        Object.keys(payload.data).forEach(key => {
+            if (!allowed.has(key)) return;
+            localStorage.setItem(key, JSON.stringify(payload.data[key] ?? []));
+        });
+
+        // Ensure defaults exist if employees got wiped accidentally
+        this.init();
     },
 
     // Clear all data
