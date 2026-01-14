@@ -2528,7 +2528,7 @@ body {
     margin-bottom: var(--space-lg);
 }
 
-/* Desktop/Mobile Views - Always show, but optimize for screen size */
+/* Desktop/Mobile Views */
 .planner-desktop,
 .availability-desktop,
 .month-stats-desktop {
@@ -2539,13 +2539,146 @@ body {
 .planner-mobile,
 .availability-mobile,
 .month-stats-mobile {
-    display: none; /* We'll implement these later */
+    display: none;
 }
+
+@media (max-width: 767px) {
+    .availability-desktop,
+    .month-stats-desktop {
+        display: none;
+    }
+
+    .availability-mobile,
+    .month-stats-mobile {
+        display: block;
+    }
+}
+
 
 @media (min-width: 768px) {    
     .admin-stats-grid {
         grid-template-columns: repeat(4, 1fr);
     }
+}
+
+/* Mobile Availability Cards */
+.availability-card {
+    background: white;
+    border-radius: var(--radius-lg);
+    padding: var(--space-lg);
+    margin-bottom: var(--space-md);
+    box-shadow: var(--shadow-sm);
+}
+
+.availability-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: var(--space-md);
+    margin-bottom: var(--space-md);
+}
+
+.availability-card-header .name {
+    font-weight: 800;
+    color: var(--gray-800);
+}
+
+.availability-card-header .sub {
+    font-size: 0.75rem;
+    color: var(--gray-500);
+    text-align: right;
+}
+
+.availability-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--space-sm);
+}
+
+.avail-pill {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-sm);
+    padding: 0.5rem 0.6rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--gray-200);
+}
+
+.avail-pill .d {
+    font-weight: 700;
+    font-size: 0.75rem;
+    color: var(--gray-700);
+}
+
+.avail-pill .t {
+    font-size: 0.75rem;
+    color: var(--gray-700);
+}
+
+.avail-pill.available {
+    background: var(--available-bg);
+}
+
+.avail-pill.unavailable {
+    background: var(--gray-50);
+    color: var(--gray-500);
+}
+
+/* Mobile Month Stats Cards */
+.month-card {
+    background: white;
+    border-radius: var(--radius-lg);
+    padding: var(--space-lg);
+    margin-bottom: var(--space-md);
+    box-shadow: var(--shadow-sm);
+}
+
+.month-card-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-md);
+    margin-bottom: var(--space-md);
+}
+
+.month-card-header .name {
+    font-weight: 800;
+    color: var(--gray-800);
+}
+
+.month-card-header .meta {
+    font-size: 0.8rem;
+    color: var(--gray-500);
+}
+
+.month-card-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--space-sm);
+}
+
+.month-card-grid .item {
+    border: 1px solid var(--gray-200);
+    background: var(--gray-50);
+    border-radius: var(--radius-md);
+    padding: 0.6rem;
+}
+
+.month-card-grid .k {
+    display: block;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--gray-500);
+    text-transform: uppercase;
+}
+
+.month-card-grid .v {
+    display: block;
+    font-size: 0.95rem;
+    font-weight: 800;
+    color: var(--gray-800);
+    margin-top: 2px;
 }
 
 /* Mobile Planner Cards */

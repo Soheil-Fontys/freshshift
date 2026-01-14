@@ -351,6 +351,33 @@ const App = {
 
         html += '</tbody>';
         table.innerHTML = html;
+
+        // Mobile cards
+        const mobile = document.getElementById('availability-mobile');
+        if (mobile) {
+            mobile.innerHTML = employees.map(emp => {
+                const avail = availabilities.find(a => a.employeeId === emp.id);
+
+                const pills = DateUtils.DAY_KEYS.map((dayKey, index) => {
+                    const day = avail?.days?.[dayKey];
+                    const label = DateUtils.DAYS_SHORT[index];
+                    if (day?.available) {
+                        return `<div class="avail-pill available"><span class="d">${label}</span><span class="t">${day.start}–${day.end}</span></div>`;
+                    }
+                    return `<div class="avail-pill unavailable"><span class="d">${label}</span><span class="t">–</span></div>`;
+                }).join('');
+
+                return `
+                    <div class="availability-card">
+                        <div class="availability-card-header">
+                            <div class="name">${emp.name}</div>
+                            <div class="sub">${DataManager.getStoreName(this.adminStore)} · ${DateUtils.formatWeekDisplay(this.availWeek)}</div>
+                        </div>
+                        <div class="availability-grid">${pills}</div>
+                    </div>
+                `;
+            }).join('') || '<div class="empty-state">Keine Verfügbarkeiten</div>';
+        }
     },
 
     // ===========================
@@ -2585,11 +2612,11 @@ const App = {
 
         
         tbody.innerHTML = employees.map(emp => {
-            const empStats = stats[emp.id] || { 
-                plannedHours: 0, 
-                actualHours: 0, 
-                lateCount: 0, 
-                earlyCount: 0 
+            const empStats = stats[emp.id] || {
+                plannedHours: 0,
+                actualHours: 0,
+                lateCount: 0,
+                earlyCount: 0
             };
             
             const diff = empStats.actualHours - empStats.plannedHours;
@@ -2613,6 +2640,36 @@ const App = {
                 </tr>
             `;
         }).join('');
+
+        // Mobile cards
+        const mobile = document.getElementById('month-stats-mobile');
+        if (mobile) {
+            mobile.innerHTML = employees.map(emp => {
+                const s = stats[emp.id] || { plannedHours: 0, actualHours: 0, lateCount: 0, earlyCount: 0 };
+                const diff = s.actualHours - s.plannedHours;
+                const diffClass = diff >= 0 ? 'positive' : 'negative';
+                const hourlyRate = Number(emp.hourlyRate);
+                const hasRate = Number.isFinite(hourlyRate) && hourlyRate > 0;
+                const earnings = hasRate ? s.actualHours * hourlyRate : null;
+
+                return `
+                    <div class="month-card">
+                        <div class="month-card-header">
+                            <div class="name">${emp.name}</div>
+                            <div class="meta">${hasRate ? `${hourlyRate.toFixed(2).replace('.', ',')} €/h` : 'Kein Stundenlohn'}</div>
+                        </div>
+                        <div class="month-card-grid">
+                            <div class="item"><span class="k">Geplant</span><span class="v">${s.plannedHours.toFixed(1)}h</span></div>
+                            <div class="item"><span class="k">Tatsächlich</span><span class="v">${s.actualHours.toFixed(1)}h</span></div>
+                            <div class="item"><span class="k">+/-</span><span class="v ${diffClass}">${diff >= 0 ? '+' : ''}${diff.toFixed(1)}h</span></div>
+                            <div class="item"><span class="k">Verdienst</span><span class="v">${hasRate ? this.formatCurrencyEUR(earnings) : '–'}</span></div>
+                            <div class="item"><span class="k">Spät</span><span class="v">${s.lateCount || 0}</span></div>
+                            <div class="item"><span class="k">Früh</span><span class="v">${s.earlyCount || 0}</span></div>
+                        </div>
+                    </div>
+                `;
+            }).join('') || '<div class="empty-state">Keine Daten</div>';
+        }
     },
 
     // ===========================
