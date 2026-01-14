@@ -7,8 +7,8 @@
     }
 
     function getConfig() {
-        const url = window.FRESHSHIFT_SUPABASE_URL || '';
-        const key = window.FRESHSHIFT_SUPABASE_ANON_KEY || '';
+        const url = window.FRESHSHIFT_SUPABASE_URL || localStorage.getItem('freshshift_supabase_url') || '';
+        const key = window.FRESHSHIFT_SUPABASE_ANON_KEY || localStorage.getItem('freshshift_supabase_anon_key') || '';
         return { url, key };
     }
 
@@ -114,8 +114,16 @@
         refreshUi();
     }
 
+    async function getAccessToken() {
+        const client = ensureClient();
+        if (!client) return null;
+        const { data } = await client.auth.getSession();
+        return data?.session?.access_token || null;
+    }
+
     window.FreshShiftSupabase = {
         init,
-        ensureClient
+        ensureClient,
+        getAccessToken
     };
 })();

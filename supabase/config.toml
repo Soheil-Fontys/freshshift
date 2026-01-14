@@ -1,0 +1,18 @@
+project_id = "freshshift"
+
+[api]
+port = 54321
+
+[db]
+port = 54322
+
+[studio]
+port = 54323
+
+[auth]
+site_url = "http://192.168.178.68:3000"
+additional_redirect_urls = ["http://192.168.178.68:3000/*"]
+
+[functions]
+[functions.invite-employee]
+verify_jwt = true

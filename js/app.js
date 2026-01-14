@@ -861,6 +861,47 @@ const App = {
 
     currentDefaultAvailabilityEmployeeId: null,
 
+    async openInviteEmployee(employeeNameEncoded) {
+        const employeeName = decodeURIComponent(employeeNameEncoded || '').trim();
+        if (!employeeName) return;
+
+        const email = prompt(`Email für ${employeeName}:`, '');
+        if (!email) return;
+
+        const token = await window.FreshShiftSupabase?.getAccessToken?.();
+        const client = window.FreshShiftSupabase?.ensureClient?.();
+        const url = (client ? client.supabaseUrl : (window.FRESHSHIFT_SUPABASE_URL || localStorage.getItem('freshshift_supabase_url') || ''));
+
+        if (!token || !url) {
+            this.showToast('Cloud Login fehlt. Bitte zuerst per Email (Magic Link) verbinden.', 'error');
+            return;
+        }
+
+        try {
+            const res = await fetch(`${url}/functions/v1/invite-employee`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    employeeName,
+                    email,
+                    redirectTo: window.location.origin + window.location.pathname
+                })
+            });
+
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                throw new Error(json.error || 'Invite fehlgeschlagen');
+            }
+
+            this.showToast(`Einladung gesendet an ${email}`, 'success');
+        } catch (e) {
+            this.showToast(e?.message || 'Invite fehlgeschlagen', 'error');
+        }
+    },
+
     openAbsenceRequestModal() {
         if (!this.currentUser) return;
 
@@ -2730,7 +2771,10 @@ const App = {
                         <button class="btn btn-secondary btn-small" onclick="App.openDefaultAvailabilityModal('${emp.id}')">
                             <span class="btn-icon-inline">⏱️</span> Standard
                         </button>
-                        <button class="btn btn-secondary btn-small btn-icon-only" onclick="App.openEditEmployeeModal('${emp.id}')">✎</button>
+                        <button class="btn btn-secondary btn-small" onclick="App.openEditEmployeeModal('${emp.id}')">✎</button>
+                        <button class="btn btn-primary btn-small" onclick="App.openInviteEmployee('${encodeURIComponent(emp.name)}')">
+                            <span class="btn-icon-inline">✉️</span> Einladen
+                        </button>
                         <button class="btn btn-danger btn-small btn-icon-only" onclick="App.deleteEmployee('${emp.id}')">✕</button>
                     </div>
                 </div>
