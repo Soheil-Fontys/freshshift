@@ -2106,6 +2106,89 @@ body {
     gap: var(--space-sm);
 }
 
+/* Shift Requests */
+.requests-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+
+.request-item {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: var(--space-md);
+    padding: var(--space-md);
+    background: var(--gray-50);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-md);
+}
+
+.request-title {
+    font-weight: 700;
+    color: var(--gray-800);
+}
+
+.request-sub {
+    font-size: 0.85rem;
+    color: var(--gray-600);
+    margin-top: 2px;
+}
+
+.request-actions {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    align-items: stretch;
+}
+
+.request-actions .btn {
+    white-space: nowrap;
+}
+
+.request-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 0.2rem 0.5rem;
+    border-radius: 999px;
+    background: #e0f2fe;
+    color: var(--primary-color);
+    border: 1px solid rgba(11, 95, 165, 0.18);
+}
+
+/* Planner cell request indicators */
+.request-indicator {
+    display: block;
+    margin-top: 4px;
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+
+.request-indicator.pending {
+    color: #0f766e;
+}
+
+.request-indicator.accepted {
+    color: #15803d;
+}
+
+.request-indicator.declined {
+    color: #b91c1c;
+}
+
+.schedule-table td.shift-cell.request-pending {
+    outline: 2px dashed rgba(11, 95, 165, 0.45);
+    outline-offset: -2px;
+}
+
+.schedule-table td.shift-cell.request-declined {
+    background: #f3f4f6 !important;
+    color: var(--gray-600);
+}
+
+
 .upcoming-shift {
     display: flex;
     align-items: center;

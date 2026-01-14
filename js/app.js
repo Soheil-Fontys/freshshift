@@ -99,6 +99,10 @@ const App = {
         // Early Leave Modal
         document.getElementById('submit-early').addEventListener('click', () => this.submitEarlyReport());
 
+        // Shift request decline
+        const declineBtn = document.getElementById('submit-request-decline');
+        if (declineBtn) declineBtn.addEventListener('click', () => this.submitShiftRequestDecline());
+
         // Admin Menu
         document.getElementById('admin-menu-toggle').addEventListener('click', () => this.toggleAdminMenu());
         const adminStoreSelect = document.getElementById('admin-store-select');
@@ -353,6 +357,7 @@ const App = {
         
         // Render all dashboard components
         this.renderTodayShift();
+        this.renderShiftRequests();
         this.renderWeekOverview();
         this.renderUpcomingShifts();
         this.updateWeekDisplay();
@@ -373,7 +378,7 @@ const App = {
         const myShifts = stores.map(storeId => {
             const schedule = DataManager.getScheduleForWeek(weekKey, storeId);
             const dayShifts = schedule?.shifts?.[todayKey] || [];
-            const shift = dayShifts.find(s => s.employeeId === this.currentUser?.id);
+            const shift = dayShifts.find(s => s.employeeId === this.currentUser?.id && s.requestStatus !== 'declined');
             return shift ? { storeId, shift } : null;
         }).filter(Boolean);
 
@@ -383,7 +388,7 @@ const App = {
                 const hours = DateUtils.calculateDuration(shift.start, shift.end);
                 container.innerHTML = `
                     <div class="shift-time-big">${shift.start} – ${shift.end}</div>
-                    <div class="shift-duration">${DateUtils.formatDuration(hours)} · ${DataManager.getStoreName(storeId)}</div>
+                    <div class="shift-duration">${DateUtils.formatDuration(hours)} · ${DataManager.getStoreName(storeId)}${shift.requestStatus === 'pending' ? ' · Anfrage' : ''}</div>
                 `;
             } else {
                 container.innerHTML = myShifts.map(({ storeId, shift }) => {
@@ -398,6 +403,164 @@ const App = {
             `;
         }
     },
+
+    getPendingShiftRequests() {
+        if (!this.currentUser) return [];
+
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        const requests = [];
+        const stores = this.getUserStores();
+
+        // Check next 30 days for pending requests
+        for (let i = 0; i < 30; i++) {
+            const checkDate = new Date(today);
+            checkDate.setDate(today.getDate() + i);
+
+            const weekKey = DateUtils.getWeekKey(checkDate);
+            const dayIndex = (checkDate.getDay() + 6) % 7; // Monday = 0
+            const dayKey = DateUtils.DAY_KEYS[dayIndex];
+
+            for (const storeId of stores) {
+                const schedule = DataManager.getScheduleForWeek(weekKey, storeId);
+                const dayShifts = schedule?.shifts?.[dayKey] || [];
+                const shift = dayShifts.find(s => s.employeeId === this.currentUser.id && s.requestStatus === 'pending');
+                if (!shift) continue;
+
+                requests.push({
+                    storeId,
+                    weekKey,
+                    dayKey,
+                    dayIndex,
+                    date: checkDate,
+                    shift
+                });
+            }
+        }
+
+        return requests;
+    },
+
+    renderShiftRequests() {
+        const card = document.getElementById('shift-requests-card');
+        const list = document.getElementById('shift-requests-list');
+        const badge = document.getElementById('shift-requests-count');
+        if (!card || !list || !badge) return;
+
+        const requests = this.getPendingShiftRequests();
+        if (requests.length === 0) {
+            card.style.display = 'none';
+            return;
+        }
+
+        card.style.display = 'block';
+        badge.textContent = `${requests.length}`;
+
+        list.innerHTML = requests.slice(0, 6).map(req => {
+            const d = req.date;
+            const dateText = DateUtils.formatDate(d);
+            const storeName = DataManager.getStoreName(req.storeId);
+            const timeText = `${req.shift.start}–${req.shift.end}`;
+
+            const summary = `${storeName} · ${DateUtils.DAYS_SHORT[req.dayIndex]} ${dateText} · ${timeText}`;
+
+            const payload = encodeURIComponent(JSON.stringify({
+                storeId: req.storeId,
+                weekKey: req.weekKey,
+                dayKey: req.dayKey,
+                employeeId: this.currentUser.id
+            }));
+
+            return `
+                <div class="request-item">
+                    <div>
+                        <div class="request-title">${storeName}</div>
+                        <div class="request-sub">${DateUtils.DAYS_SHORT[req.dayIndex]} · ${dateText} · ${timeText}</div>
+                        <div class="request-badge">⏳ Anfrage offen</div>
+                    </div>
+                    <div class="request-actions">
+                        <button class="btn btn-success btn-small" onclick="App.acceptShiftRequest('${payload}')">Annehmen</button>
+                        <button class="btn btn-danger btn-small" onclick="App.openDeclineShiftRequest('${payload}', '${encodeURIComponent(summary)}')">Ablehnen</button>
+                    </div>
+                </div>
+            `;
+        }).join('') + (requests.length > 6 ? `<div class="helper-text">+ ${requests.length - 6} weitere…</div>` : '');
+    },
+
+    acceptShiftRequest(payload) {
+        try {
+            const data = JSON.parse(decodeURIComponent(payload));
+            this.respondShiftRequest(data, 'accepted', null);
+            this.showToast('Schichtanfrage angenommen.', 'success');
+        } catch {
+            this.showToast('Schichtanfrage konnte nicht verarbeitet werden.', 'error');
+        }
+    },
+
+    openDeclineShiftRequest(payload, summaryEncoded) {
+        try {
+            const data = JSON.parse(decodeURIComponent(payload));
+            this.pendingShiftRequest = data;
+            const summary = decodeURIComponent(summaryEncoded || '');
+            const el = document.getElementById('shift-request-summary');
+            if (el) el.textContent = summary;
+            const input = document.getElementById('shift-request-reason');
+            if (input) input.value = '';
+            this.showModal('shift-request-modal');
+        } catch {
+            this.showToast('Schichtanfrage konnte nicht verarbeitet werden.', 'error');
+        }
+    },
+
+    submitShiftRequestDecline() {
+        const reason = document.getElementById('shift-request-reason')?.value?.trim() || '';
+        if (!reason) {
+            this.showToast('Bitte einen Grund eingeben.', 'error');
+            return;
+        }
+        if (!this.pendingShiftRequest) return;
+        this.respondShiftRequest(this.pendingShiftRequest, 'declined', reason);
+        this.pendingShiftRequest = null;
+        this.hideModals();
+        this.showToast('Schichtanfrage abgelehnt.', 'success');
+    },
+
+    respondShiftRequest({ storeId, weekKey, dayKey, employeeId }, status, reason) {
+        const schedule = DataManager.getScheduleForWeek(weekKey, storeId);
+        const dayShifts = schedule?.shifts?.[dayKey] || [];
+        const shift = dayShifts.find(s => s.employeeId === employeeId && s.requestStatus === 'pending');
+        if (!schedule || !shift) {
+            this.showToast('Anfrage nicht mehr verfügbar.', 'error');
+            return;
+        }
+
+        shift.requestStatus = status;
+        shift.respondedAt = new Date().toISOString();
+        shift.responseReason = reason || null;
+
+        schedule.storeId = storeId;
+        DataManager.saveSchedule(schedule);
+
+        // Notify admin (local only)
+        const employee = DataManager.getEmployee(employeeId);
+        DataManager.addNotification({
+            target: 'admin',
+            type: 'shift_request_response',
+            storeId,
+            employeeId,
+            employeeName: employee?.name || 'Unbekannt',
+            message: status === 'accepted' ? 'Schichtanfrage angenommen' : 'Schichtanfrage abgelehnt',
+            reason: reason || null
+        });
+
+        // Re-render UI
+        this.renderShiftRequests();
+        this.renderMyScheduleSection();
+        this.renderDashboard();
+    },
+
+    pendingShiftRequest: null,
 
     renderWeekOverview() {
         const container = document.getElementById('week-overview');
@@ -462,20 +625,20 @@ const App = {
             const weekKey = DateUtils.getWeekKey(checkDate);
             const dayIndex = (checkDate.getDay() + 6) % 7; // Monday = 0
             const dayKey = DateUtils.DAY_KEYS[dayIndex];
-
+ 
             const stores = this.getUserStores();
             let found = null;
-
+ 
             for (const storeId of stores) {
                 const schedule = DataManager.getScheduleForWeek(weekKey, storeId);
                 const dayShifts = schedule?.shifts?.[dayKey] || [];
-                const myShift = dayShifts.find(s => s.employeeId === this.currentUser?.id);
+                const myShift = dayShifts.find(s => s.employeeId === this.currentUser?.id && s.requestStatus !== 'declined');
                 if (myShift) {
                     found = { storeId, shift: myShift };
                     break;
                 }
             }
-
+ 
             if (found && i > 0) { // Skip today
                 upcoming.push({
                     date: checkDate,
@@ -485,6 +648,7 @@ const App = {
                 });
             }
         }
+
         
         if (upcoming.length === 0) {
             container.innerHTML = '<div class="no-upcoming">Keine weiteren Schichten geplant</div>';
@@ -693,11 +857,12 @@ const App = {
         let totalHours = 0;
         
         DateUtils.DAY_KEYS.forEach(dayKey => {
-            const dayShifts = schedule.shifts?.[dayKey] || [];
-            totalShifts += dayShifts.length;
-            dayShifts.forEach(shift => {
-                totalHours += DateUtils.calculateDuration(shift.start, shift.end);
-            });
+                const dayShifts = schedule.shifts?.[dayKey] || [];
+                const activeShifts = dayShifts.filter(s => s.requestStatus !== 'declined');
+                totalShifts += activeShifts.length;
+                activeShifts.forEach(shift => {
+                    totalHours += DateUtils.calculateDuration(shift.start, shift.end);
+                });
         });
         
         const statusClass = schedule.released ? 'status-success' : 'status-pending';
@@ -769,7 +934,8 @@ const App = {
     },
 
     updateAdminNotifications() {
-        const notifications = DataManager.getUnreadNotifications().filter(n => !n.storeId || n.storeId === this.adminStore);
+        const notifications = DataManager.getUnreadNotifications()
+            .filter(n => (n.target !== 'employee') && (!n.storeId || n.storeId === this.adminStore));
 
         const badge = document.getElementById('notification-badge');
         const count = document.getElementById('notification-count');
@@ -782,13 +948,19 @@ const App = {
             card.style.display = 'block';
             
             list.innerHTML = notifications.map(n => {
-                const icon = n.type === 'early' ? '🚪' : '⏰';
+                let icon = '🔔';
+                if (n.type === 'early') icon = '🚪';
+                else if (n.type === 'late') icon = '⏰';
+                else if (n.type === 'shift_request_response') icon = '✅';
+
+                const titleName = n.employeeName ? `${n.employeeName}: ` : '';
+
                 return `
                     <div class="notification-item ${n.type}">
                         <span class="notification-icon">${icon}</span>
                         <div class="notification-content">
-                            <div class="notification-title">${n.employeeName}: ${n.message}${n.storeId ? ` · ${DataManager.getStoreName(n.storeId)}` : ''}</div>
-                            ${n.reason ? `<div class="notification-reason">Grund: ${n.reason}</div>` : ''}
+                            <div class="notification-title">${titleName}${n.message}${n.storeId ? ` · ${DataManager.getStoreName(n.storeId)}` : ''}</div>
+                            ${n.reason ? `<div class="notification-reason">${n.type === 'shift_request_response' ? 'Info' : 'Grund'}: ${n.reason}</div>` : ''}
                             <div class="notification-time">${this.formatTimestamp(n.timestamp)}</div>
                         </div>
                     </div>
@@ -1388,14 +1560,18 @@ const App = {
 
         DateUtils.DAY_KEYS.forEach((dayKey, index) => {
             const daySchedule = schedule.shifts?.[dayKey] || [];
-            const myShift = daySchedule.find(s => s.employeeId === this.currentUser?.id);
+            const myShift = daySchedule.find(s => s.employeeId === this.currentUser?.id && s.requestStatus !== 'declined');
             
             const card = document.createElement('div');
             
             if (myShift) {
+                const isPending = myShift.requestStatus === 'pending';
                 const hours = DateUtils.calculateDuration(myShift.start, myShift.end);
-                totalHours += hours;
-                shiftCount++;
+
+                if (!isPending) {
+                    totalHours += hours;
+                    shiftCount++;
+                }
                 
                 // Check for deviations
                 let deviationHtml = '';
@@ -1407,6 +1583,8 @@ const App = {
                         deviationHtml = `<div class="shift-deviation early">${myShift.deviation.earlyMinutes} Min. früher gegangen</div>`;
                     }
                 }
+
+                const requestHtml = isPending ? `<div class="shift-deviation early">⏳ Schichtanfrage offen</div>` : '';
                 
                 card.className = 'my-shift-card';
                 card.innerHTML = `
@@ -1416,7 +1594,8 @@ const App = {
                     </div>
                     <div class="shift-details">
                         <div class="shift-time">${myShift.start} – ${myShift.end}</div>
-                        <div class="shift-note">${DateUtils.formatDuration(hours)}</div>
+                        <div class="shift-note">${isPending ? 'Anfrage' : DateUtils.formatDuration(hours)}</div>
+                        ${requestHtml}
                         ${deviationHtml}
                     </div>
                 `;
@@ -1521,6 +1700,15 @@ const App = {
                     // Check for deviations
                     let cellClass = 'shift-cell has-shift';
                     let deviationHtml = '';
+                    let requestHtml = '';
+
+                    if (shift.requestStatus === 'pending') {
+                        cellClass += ' request-pending';
+                        requestHtml = `<span class="request-indicator pending">⏳ Anfrage</span>`;
+                    } else if (shift.requestStatus === 'declined') {
+                        cellClass += ' request-declined';
+                        requestHtml = `<span class="request-indicator declined">✕ Abgelehnt</span>`;
+                    }
                     
                     if (shift.deviation) {
                         if (shift.deviation.lateMinutes) {
@@ -1536,6 +1724,7 @@ const App = {
                     html += `<td class="${cellClass}" 
                         onclick="App.openShiftModal('${emp.id}', '${dayKey}', ${dayIndex})">
                         <span class="shift-time">${shift.start}–${shift.end}</span>
+                        ${requestHtml}
                         ${deviationHtml}
                     </td>`;
                 } else {
@@ -1733,6 +1922,29 @@ const App = {
             end: end
         };
 
+        // If employee has no availability for this day, create a shift request
+        const employeeAvail = DataManager.getEmployeeAvailability(employeeId, weekKey, this.adminStore);
+        const dayAvail = employeeAvail?.days?.[dayKey];
+        const needsRequest = !(dayAvail?.available);
+
+        if (needsRequest) {
+            shift.requestStatus = 'pending';
+            shift.requestedAt = new Date().toISOString();
+            shift.requestedBy = 'admin';
+
+            // Local notification (no backend): only visible on same device
+            DataManager.addNotification({
+                target: 'employee',
+                targetEmployeeId: employeeId,
+                type: 'shift_request',
+                storeId: this.adminStore,
+                employeeId: employeeId,
+                employeeName: employee.name,
+                message: `Schichtanfrage: ${start}–${end}`,
+                reason: 'Bitte annehmen oder ablehnen.'
+            });
+        }
+
         // Check for deviations
         if (actualStart || actualEnd) {
             shift.actualStart = actualStart || null;
@@ -1774,7 +1986,7 @@ const App = {
         this.renderScheduleEditor();
         this.renderWeekDeviations();
         this.updateReleaseButton();
-        this.showToast('Schicht eingetragen!', 'success');
+        this.showToast(needsRequest ? 'Schichtanfrage gesendet!' : 'Schicht eingetragen!', needsRequest ? 'warning' : 'success');
     },
 
     removeShift() {

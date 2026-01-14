@@ -460,12 +460,15 @@ const DataManager = {
                 if (checkDate.getFullYear() === year && checkDate.getMonth() === month) {
                     const dayShifts = schedule.shifts?.[dayKey] || [];
                     
-                    dayShifts.forEach(shift => {
-                        if (!stats[shift.employeeId]) return;
-                        
-                        // Planned hours
-                        const plannedHours = DateUtils.calculateDuration(shift.start, shift.end);
-                        stats[shift.employeeId].plannedHours += plannedHours;
+                        dayShifts.forEach(shift => {
+                            if (!stats[shift.employeeId]) return;
+
+                            // Ignore declined/pending requests
+                            if (shift.requestStatus === 'declined' || shift.requestStatus === 'pending') return;
+                            
+                            // Planned hours
+                            const plannedHours = DateUtils.calculateDuration(shift.start, shift.end);
+                            stats[shift.employeeId].plannedHours += plannedHours;
                         
                         // Actual hours (if deviation exists)
                         if (shift.actualStart || shift.actualEnd) {

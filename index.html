@@ -138,7 +138,16 @@
                             </button>
                         </div>
                     </div>
-                    
+
+                    <!-- Shift Requests -->
+                    <div id="shift-requests-card" class="dashboard-card" style="display:none;">
+                        <div class="card-header">
+                            <h3>Schichtanfragen</h3>
+                            <span id="shift-requests-count" class="week-badge"></span>
+                        </div>
+                        <div id="shift-requests-list" class="requests-list"></div>
+                    </div>
+                     
                     <!-- Week Overview -->
                     <div class="dashboard-card week-card">
                         <div class="card-header">
@@ -285,6 +294,27 @@
                 <div class="modal-footer">
                     <button class="btn btn-secondary modal-cancel">Abbrechen</button>
                     <button class="btn btn-primary" id="submit-early">Meldung senden</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Shift Request Decline Modal -->
+        <div id="shift-request-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Schichtanfrage ablehnen</h3>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p id="shift-request-summary" class="modal-info"></p>
+                    <div class="form-group">
+                        <label for="shift-request-reason">Grund</label>
+                        <input type="text" id="shift-request-reason" placeholder="z.B. Schon verplant / Termin" />
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary modal-cancel">Abbrechen</button>
+                    <button class="btn btn-danger" id="submit-request-decline">Ablehnen</button>
                 </div>
             </div>
         </div>
