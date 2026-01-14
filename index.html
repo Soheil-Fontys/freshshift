@@ -149,6 +149,15 @@
                         <div id="shift-requests-list" class="requests-list"></div>
                     </div>
                      
+                    <!-- Month Earnings -->
+                    <div id="earnings-card" class="dashboard-card" style="display:none;">
+                        <div class="card-header">
+                            <h3>Dieser Monat</h3>
+                            <span id="earnings-month" class="week-badge"></span>
+                        </div>
+                        <div id="earnings-summary" class="earnings-summary"></div>
+                    </div>
+
                     <!-- Week Overview -->
                     <div class="dashboard-card week-card">
                         <div class="card-header">
@@ -536,6 +545,8 @@
                                         <th>Geplant</th>
                                         <th>Tatsächlich</th>
                                         <th>+/-</th>
+                                        <th>€/h</th>
+                                        <th>Verdienst</th>
                                         <th>Spät</th>
                                         <th>Früh</th>
                                     </tr>
@@ -698,6 +709,10 @@
                         <div class="form-group" id="new-emp-primary-store-group" style="display:none;">
                             <label for="new-emp-primary-store">Hauptgeschäft</label>
                             <select id="new-emp-primary-store"></select>
+                        </div>
+                        <div class="form-group">
+                            <label for="new-emp-hourly">Stundenlohn (€/h)</label>
+                            <input type="number" id="new-emp-hourly" inputmode="decimal" step="0.5" min="0" placeholder="z.B. 13,50">
                         </div>
                     </div>
                 </div>

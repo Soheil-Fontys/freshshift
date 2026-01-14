@@ -372,6 +372,7 @@ const App = {
         // Render all dashboard components
         this.renderTodayShift();
         this.renderShiftRequests();
+        this.renderMonthlyEarnings();
         this.renderWeekOverview();
         this.renderUpcomingShifts();
         this.updateWeekDisplay();
@@ -500,6 +501,61 @@ const App = {
                 </div>
             `;
         }).join('') + (requests.length > 6 ? `<div class="helper-text">+ ${requests.length - 6} weitere…</div>` : '');
+    },
+
+    formatCurrencyEUR(amount) {
+        const n = Number(amount);
+        if (!Number.isFinite(n)) return '–';
+        return n.toLocaleString('de-DE', { style: 'currency', currency: 'EUR' });
+    },
+
+    renderMonthlyEarnings() {
+        const card = document.getElementById('earnings-card');
+        const badge = document.getElementById('earnings-month');
+        const container = document.getElementById('earnings-summary');
+        if (!card || !badge || !container || !this.currentUser) return;
+
+        const hourlyRate = Number(this.currentUser.hourlyRate);
+        if (!Number.isFinite(hourlyRate) || hourlyRate <= 0) {
+            card.style.display = 'none';
+            return;
+        }
+
+        const now = new Date();
+        badge.textContent = now.toLocaleDateString('de-DE', { month: 'short' });
+
+        const stores = this.getUserStores();
+        const breakdown = stores.map(storeId => {
+            const stats = DataManager.getMonthStats(now, storeId);
+            const s = stats?.[this.currentUser.id];
+            const hours = s ? s.actualHours : 0;
+            const amount = hours * hourlyRate;
+            return { storeId, hours, amount };
+        }).filter(x => x.hours > 0);
+
+        const totalHours = breakdown.reduce((sum, x) => sum + x.hours, 0);
+        const totalAmount = breakdown.reduce((sum, x) => sum + x.amount, 0);
+
+        card.style.display = 'block';
+
+        const rows = breakdown.length > 1
+            ? `<div class="earnings-breakdown">${breakdown.map(x => `
+                <div class="earnings-row">
+                    <span>${DataManager.getStoreName(x.storeId)}</span>
+                    <span class="muted">${x.hours.toFixed(1)}h · ${this.formatCurrencyEUR(x.amount)}</span>
+                </div>
+            `).join('')}</div>`
+            : '';
+
+        container.innerHTML = `
+            <div class="earnings-total">
+                <div>
+                    <div class="amount">${this.formatCurrencyEUR(totalAmount)}</div>
+                    <div class="hours">${totalHours.toFixed(1)}h · ${hourlyRate.toFixed(2).replace('.', ',')} €/h</div>
+                </div>
+            </div>
+            ${rows}
+        `;
     },
 
     acceptShiftRequest(payload) {
@@ -2540,12 +2596,18 @@ const App = {
             const diffClass = diff >= 0 ? 'positive' : 'negative';
             const diffText = diff >= 0 ? `+${diff.toFixed(1)}` : diff.toFixed(1);
             
+            const hourlyRate = Number(emp.hourlyRate);
+            const hasRate = Number.isFinite(hourlyRate) && hourlyRate > 0;
+            const earnings = hasRate ? empStats.actualHours * hourlyRate : null;
+
             return `
                 <tr>
                     <td class="highlight">${emp.name}</td>
                     <td>${empStats.plannedHours.toFixed(1)} Std.</td>
                     <td>${empStats.actualHours.toFixed(1)} Std.</td>
                     <td class="${diffClass}">${diffText} Std.</td>
+                    <td>${hasRate ? hourlyRate.toFixed(2).replace('.', ',') : '-'}</td>
+                    <td>${hasRate ? this.formatCurrencyEUR(earnings) : '-'}</td>
                     <td>${empStats.lateCount > 0 ? empStats.lateCount + 'x' : '-'}</td>
                     <td>${empStats.earlyCount > 0 ? empStats.earlyCount + 'x' : '-'}</td>
                 </tr>
@@ -2853,6 +2915,7 @@ const App = {
         document.getElementById('new-emp-id').value = '';
         document.getElementById('new-emp-name').value = '';
         document.getElementById('new-emp-type').value = 'aushilfe';
+        document.getElementById('new-emp-hourly').value = '';
 
         // Default store = current admin store
         document.getElementById('store-fresh-fries').checked = (this.adminStore === 'fresh_fries');
@@ -2872,6 +2935,7 @@ const App = {
         document.getElementById('new-emp-id').value = emp.id;
         document.getElementById('new-emp-name').value = emp.name || '';
         document.getElementById('new-emp-type').value = emp.type || 'aushilfe';
+        document.getElementById('new-emp-hourly').value = (Number(emp.hourlyRate) > 0) ? String(emp.hourlyRate).replace('.', ',') : '';
 
         const stores = Array.isArray(emp.stores) && emp.stores.length > 0 ? emp.stores : [emp.primaryStore || emp.store || 'fresh_fries'];
         document.getElementById('store-fresh-fries').checked = stores.includes('fresh_fries');
@@ -2919,6 +2983,9 @@ const App = {
         const name = document.getElementById('new-emp-name').value.trim();
         const type = document.getElementById('new-emp-type').value;
 
+        const hourlyRaw = document.getElementById('new-emp-hourly').value.trim();
+        const hourlyRate = hourlyRaw ? Number(hourlyRaw.replace(',', '.')) : null;
+
         const stores = [];
         if (document.getElementById('store-fresh-fries').checked) stores.push('fresh_fries');
         if (document.getElementById('store-yes-fresh').checked) stores.push('yes_fresh');
@@ -2948,11 +3015,24 @@ const App = {
             return;
         }
 
+        if (hourlyRate !== null && (!Number.isFinite(hourlyRate) || hourlyRate < 0)) {
+            this.showToast('Ungültiger Stundenlohn.', 'error');
+            return;
+        }
+
+        const employeePatch = {
+            name,
+            type,
+            primaryStore,
+            stores,
+            hourlyRate: hourlyRate
+        };
+
         if (id) {
-            DataManager.updateEmployee({ id, name, type, primaryStore, stores });
+            DataManager.updateEmployee({ id, ...employeePatch });
             this.showToast(`${name} aktualisiert!`, 'success');
         } else {
-            DataManager.addEmployee({ name, type, primaryStore, stores });
+            DataManager.addEmployee(employeePatch);
             this.showToast(`${name} hinzugefügt!`, 'success');
         }
 
