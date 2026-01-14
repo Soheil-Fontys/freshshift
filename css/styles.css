@@ -2940,8 +2940,7 @@ body {
 
 @media print {
     @page {
-        size: landscape;
-        margin: 10mm;
+        margin: 12mm;
     }
 
     body {
@@ -2981,15 +2980,10 @@ body {
         border-bottom: 1px solid #e5e7eb;
     }
 
-    .schedule-editor {
-        overflow: visible !important;
-    }
-
     .schedule-table {
         width: 100% !important;
         border-collapse: collapse !important;
-        table-layout: fixed;
-        font-size: 10px;
+        font-size: 0.9rem;
     }
 
     .schedule-table th,
@@ -2997,21 +2991,6 @@ body {
         border: 1px solid #e5e7eb !important;
         background: white !important;
         color: #111827 !important;
-        padding: 4px 4px !important;
-        min-width: 0 !important;
-    }
-
-    .schedule-table th .date {
-        font-size: 9px !important;
-    }
-
-    .schedule-table td.name-cell {
-        min-width: 0 !important;
-        width: 120px !important;
-    }
-
-    .schedule-table .shift-time {
-        font-size: 10px !important;
     }
 
     .schedule-table td.shift-cell.cell-absent,
