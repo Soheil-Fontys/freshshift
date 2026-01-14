@@ -1473,6 +1473,9 @@ const App = {
         const dates = DateUtils.getWeekDates(this.currentWeek);
         const employees = DataManager.getEmployees().filter(e => (e.stores || []).includes(this.adminStore));
         const schedule = DataManager.getScheduleForWeek(weekKey, this.adminStore);
+        const availabilities = DataManager.getAvailabilityForWeek(weekKey, this.adminStore);
+        const availByEmployeeId = new Map(availabilities.map(a => [a.employeeId, a]));
+
 
         // Header
         let html = '<thead><tr><th>Name</th>';
@@ -1536,8 +1539,12 @@ const App = {
                         ${deviationHtml}
                     </td>`;
                 } else {
+                    const empAvail = availByEmployeeId.get(emp.id);
+                    const dayAvail = empAvail?.days?.[dayKey];
+                    const hint = dayAvail?.available ? `<span class="avail-hint">${dayAvail.start}–${dayAvail.end}</span>` : '';
+
                     html += `<td class="shift-cell" 
-                        onclick="App.openShiftModal('${emp.id}', '${dayKey}', ${dayIndex})"></td>`;
+                        onclick="App.openShiftModal('${emp.id}', '${dayKey}', ${dayIndex})">${hint}</td>`;
                 }
             });
             html += '</tr>';
