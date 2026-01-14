@@ -2939,42 +2939,52 @@ body {
 }
 
 @media print {
-    @page {
-        margin: 12mm;
-    }
-
     body {
         background: white !important;
-        -webkit-print-color-adjust: exact;
-        print-color-adjust: exact;
     }
 
-    /* Robust print: hide everything, then show planner */
-    body * {
-        visibility: hidden !important;
-    }
-
-    #page-admin-planner,
-    #page-admin-planner * {
-        visibility: visible !important;
-    }
-
-    #page-admin-planner {
-        position: absolute !important;
-        left: 0 !important;
-        top: 0 !important;
-        width: 100% !important;
-    }
-
-    #page-admin-planner .page-header,
-    #week-deviations-panel,
-    .planner-actions,
-    .week-selector {
+    /* Only print the planner table */
+    #admin-screen .page-content {
         display: none !important;
     }
 
-    .print-header {
+    #page-admin-planner {
         display: block !important;
+    }
+
+    #page-admin-planner .page-header,
+    #week-deviations-panel {
+        display: none !important;
+    }
+
+    .app-header,
+    .menu-overlay,
+    .side-menu,
+    .planner-actions,
+    .week-selector,
+    #toast-container,
+    .modal {
+        display: none !important;
+    }
+
+
+    .screen,
+    .screen.active {
+        background: white !important;
+    }
+
+    .container {
+        padding: 0 !important;
+        max-width: none !important;
+    }
+
+    .dashboard-card,
+    .schedule-editor {
+        box-shadow: none !important;
+    }
+
+    .print-header {
+        display: block;
         margin: 0 0 12px 0;
         padding-bottom: 10px;
         border-bottom: 1px solid #e5e7eb;
@@ -2983,7 +2993,6 @@ body {
     .schedule-table {
         width: 100% !important;
         border-collapse: collapse !important;
-        font-size: 0.9rem;
     }
 
     .schedule-table th,
@@ -2996,22 +3005,19 @@ body {
     .schedule-table td.shift-cell.cell-absent,
     .schedule-table td.shift-cell.cell-sick,
     .schedule-table td.shift-cell.deviation-late,
-    .schedule-table td.shift-cell.deviation-early,
-    .schedule-table td.shift-cell.request-declined {
+    .schedule-table td.shift-cell.deviation-early {
         background: white !important;
-    }
-
-    .avail-hint,
-    .request-indicator {
-        display: none !important;
     }
 
     .absence-cell-badge,
     .deviation-indicator {
         color: #111827 !important;
     }
-}
 
+    @page {
+        margin: 12mm;
+    }
+}
 
 /* ===========================
    Enhanced Admin Dashboard
