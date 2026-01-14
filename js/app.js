@@ -19,6 +19,10 @@ const App = {
 
         this.bindEvents();
         this.loadEmployeeDropdown();
+
+        if (window.FreshShiftSupabase?.init) {
+            window.FreshShiftSupabase.init();
+        }
         this.populateAdminStoreSelect();
         this.updateWeekDisplay();
         this.updateMonthDisplay();
