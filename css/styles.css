@@ -2587,6 +2587,33 @@ body {
     gap: var(--space-sm);
 }
 
+.absence-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    border: 1px solid rgba(15, 23, 42, 0.10);
+}
+
+.absence-pill.pending {
+    background: #e0f2fe;
+    color: var(--primary-color);
+}
+
+.absence-pill.approved {
+    background: #dcfce7;
+    color: #15803d;
+}
+
+.absence-pill.declined {
+    background: #fee2e2;
+    color: #b91c1c;
+}
+
+
 .absence-item {
     display: flex;
     align-items: flex-start;

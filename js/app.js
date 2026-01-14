@@ -103,6 +103,12 @@ const App = {
         const declineBtn = document.getElementById('submit-request-decline');
         if (declineBtn) declineBtn.addEventListener('click', () => this.submitShiftRequestDecline());
 
+        // Employee absence request
+        const requestAbsenceBtn = document.getElementById('request-absence-btn');
+        if (requestAbsenceBtn) requestAbsenceBtn.addEventListener('click', () => this.openAbsenceRequestModal());
+        const submitAbsenceBtn = document.getElementById('submit-absence-request');
+        if (submitAbsenceBtn) submitAbsenceBtn.addEventListener('click', () => this.submitAbsenceRequest());
+
         // Admin Menu
         document.getElementById('admin-menu-toggle').addEventListener('click', () => this.toggleAdminMenu());
         const adminStoreSelect = document.getElementById('admin-store-select');
@@ -243,6 +249,8 @@ const App = {
             this.renderAvailabilityForm();
         } else if (page === 'schedule') {
             this.renderMyScheduleSection();
+        } else if (page === 'absences') {
+            this.renderEmployeeAbsencesPage();
         } else if (page === 'dashboard') {
             this.renderDashboard();
         }
@@ -561,6 +569,170 @@ const App = {
     },
 
     pendingShiftRequest: null,
+
+    approveAbsenceRequest(payload) {
+        try {
+            const { notificationId, absenceId } = JSON.parse(decodeURIComponent(payload));
+            const absence = DataManager.getAbsence(absenceId);
+            if (!absence) {
+                this.showToast('Anfrage nicht mehr verfügbar.', 'error');
+                return;
+            }
+
+            DataManager.updateAbsence({
+                id: absenceId,
+                status: 'approved',
+                respondedAt: new Date().toISOString(),
+                responseReason: null
+            });
+
+            DataManager.markNotificationRead(notificationId);
+            this.updateAdminNotifications();
+            this.renderAbsencesOverview();
+            this.renderScheduleEditor();
+
+            this.showToast('Urlaubsanfrage genehmigt.', 'success');
+        } catch {
+            this.showToast('Anfrage konnte nicht verarbeitet werden.', 'error');
+        }
+    },
+
+    denyAbsenceRequest(payload) {
+        try {
+            const { notificationId, absenceId } = JSON.parse(decodeURIComponent(payload));
+            const absence = DataManager.getAbsence(absenceId);
+            if (!absence) {
+                this.showToast('Anfrage nicht mehr verfügbar.', 'error');
+                return;
+            }
+
+            const reason = prompt('Grund für Ablehnung (optional):', '');
+
+            DataManager.updateAbsence({
+                id: absenceId,
+                status: 'declined',
+                respondedAt: new Date().toISOString(),
+                responseReason: reason || null
+            });
+
+            DataManager.markNotificationRead(notificationId);
+            this.updateAdminNotifications();
+            this.renderAbsencesOverview();
+
+            this.showToast('Urlaubsanfrage abgelehnt.', 'warning');
+        } catch {
+            this.showToast('Anfrage konnte nicht verarbeitet werden.', 'error');
+        }
+    },
+ 
+    renderEmployeeAbsencesPage() {
+        if (!this.currentUser) return;
+
+        const list = document.getElementById('employee-absences-list');
+        if (!list) return;
+
+        const absences = DataManager.getAbsencesForEmployee(this.currentUser.id)
+            .sort((a, b) => String(a.startDate).localeCompare(String(b.startDate)))
+            .reverse();
+
+        if (absences.length === 0) {
+            list.innerHTML = '<div class="empty-state">Noch keine Abwesenheiten</div>';
+            return;
+        }
+
+        list.innerHTML = absences.map(a => {
+            const typeIcon = a.type === 'urlaub' ? '🏖️' : a.type === 'krank' ? '🤒' : '📅';
+            const typeLabel = a.type === 'urlaub' ? 'Urlaub' : a.type === 'krank' ? 'Krankheit' : 'Sonstiges';
+
+            const startDate = new Date(a.startDate);
+            const endDate = new Date(a.endDate);
+            const dateText = a.startDate === a.endDate
+                ? DateUtils.formatDate(startDate)
+                : `${DateUtils.formatDate(startDate)} – ${DateUtils.formatDate(endDate)}`;
+
+            const status = a.status || 'approved';
+            const statusLabel = status === 'pending' ? 'Wartet' : status === 'declined' ? 'Abgelehnt' : 'Bestätigt';
+
+            const statusPill = `<span class="absence-pill ${status}">${statusLabel}</span>`;
+            const reason = a.responseReason ? `<div class="absence-note">Grund: ${a.responseReason}</div>` : '';
+
+            return `
+                <div class="absence-item ${status === 'pending' ? 'absence-active' : ''}">
+                    <span class="absence-icon">${typeIcon}</span>
+                    <div class="absence-info">
+                        <div class="absence-name">${typeLabel} ${statusPill}</div>
+                        <div class="absence-dates">${dateText}</div>
+                        ${a.note ? `<div class="absence-note">${a.note}</div>` : ''}
+                        ${reason}
+                    </div>
+                </div>
+            `;
+        }).join('');
+    },
+
+    openAbsenceRequestModal() {
+        if (!this.currentUser) return;
+
+        const today = new Date().toISOString().split('T')[0];
+        const start = document.getElementById('absence-request-start');
+        const end = document.getElementById('absence-request-end');
+        const type = document.getElementById('absence-request-type');
+        const note = document.getElementById('absence-request-note');
+
+        if (start) start.value = today;
+        if (end) end.value = today;
+        if (type) type.value = 'urlaub';
+        if (note) note.value = '';
+
+        this.showModal('absence-request-modal');
+    },
+
+    submitAbsenceRequest() {
+        if (!this.currentUser) return;
+
+        const type = document.getElementById('absence-request-type').value;
+        const startDate = document.getElementById('absence-request-start').value;
+        const endDate = document.getElementById('absence-request-end').value;
+        const note = document.getElementById('absence-request-note').value.trim();
+
+        if (!startDate || !endDate) {
+            this.showToast('Bitte Datum eingeben.', 'error');
+            return;
+        }
+        if (new Date(startDate) > new Date(endDate)) {
+            this.showToast('Enddatum muss nach Startdatum sein.', 'error');
+            return;
+        }
+
+        const status = type === 'krank' ? 'approved' : 'pending';
+
+        const absence = DataManager.addAbsence({
+            employeeId: this.currentUser.id,
+            startDate,
+            endDate,
+            type,
+            note: note || null,
+            status,
+            requestedBy: 'employee',
+            requestedAt: new Date().toISOString()
+        });
+
+        // Notify admin (local only)
+        const typeLabel = type === 'urlaub' ? 'Urlaub' : type === 'krank' ? 'Krankheit' : 'Sonstiges';
+        DataManager.addNotification({
+            target: 'admin',
+            type: type === 'krank' ? 'absence_notice' : 'absence_request',
+            employeeId: this.currentUser.id,
+            employeeName: this.currentUser.name,
+            absenceId: absence.id,
+            message: `${typeLabel}: ${startDate}${endDate !== startDate ? ' bis ' + endDate : ''}`,
+            reason: note || null
+        });
+
+        this.hideModals();
+        this.renderEmployeeAbsencesPage();
+        this.showToast(type === 'krank' ? 'Krankheit gemeldet.' : 'Urlaubsanfrage gesendet.', 'success');
+    },
 
     renderWeekOverview() {
         const container = document.getElementById('week-overview');
@@ -952,8 +1124,21 @@ const App = {
                 if (n.type === 'early') icon = '🚪';
                 else if (n.type === 'late') icon = '⏰';
                 else if (n.type === 'shift_request_response') icon = '✅';
+                else if (n.type === 'absence_request') icon = '📅';
+                else if (n.type === 'absence_notice') icon = '🤒';
 
                 const titleName = n.employeeName ? `${n.employeeName}: ` : '';
+
+                const needsAbsenceActions = n.type === 'absence_request' && n.absenceId;
+                const actions = needsAbsenceActions ? (() => {
+                    const payload = encodeURIComponent(JSON.stringify({ notificationId: n.id, absenceId: n.absenceId }));
+                    return `
+                        <div class="request-actions" style="margin-top: 8px; flex-direction: row;">
+                            <button class="btn btn-success btn-small" onclick="App.approveAbsenceRequest('${payload}')">Genehmigen</button>
+                            <button class="btn btn-danger btn-small" onclick="App.denyAbsenceRequest('${payload}')">Ablehnen</button>
+                        </div>
+                    `;
+                })() : '';
 
                 return `
                     <div class="notification-item ${n.type}">
@@ -962,6 +1147,7 @@ const App = {
                             <div class="notification-title">${titleName}${n.message}${n.storeId ? ` · ${DataManager.getStoreName(n.storeId)}` : ''}</div>
                             ${n.reason ? `<div class="notification-reason">${n.type === 'shift_request_response' ? 'Info' : 'Grund'}: ${n.reason}</div>` : ''}
                             <div class="notification-time">${this.formatTimestamp(n.timestamp)}</div>
+                            ${actions}
                         </div>
                     </div>
                 `;
@@ -2343,9 +2529,10 @@ const App = {
         futureDate.setDate(futureDate.getDate() + 30);
         
         const relevantAbsences = absences.filter(a => {
+            const status = a.status || 'approved';
             const endDate = new Date(a.endDate);
             const startDate = new Date(a.startDate);
-            return endDate >= today && startDate <= futureDate;
+            return endDate >= today && startDate <= futureDate && status !== 'declined';
         }).sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
         
         if (relevantAbsences.length === 0) {
@@ -2368,13 +2555,19 @@ const App = {
                 ? DateUtils.formatDate(startDate)
                 : `${DateUtils.formatDate(startDate)} – ${DateUtils.formatDate(endDate)}`;
             
+            const status = absence.status || 'approved';
+            const statusPill = status === 'pending'
+                ? '<span class="absence-pill pending">Wartet</span>'
+                : '<span class="absence-pill approved">Bestätigt</span>';
+
             return `
                 <div class="absence-item ${isActive ? 'absence-active' : ''}" onclick="App.editAbsence('${absence.id}')">
                     <span class="absence-icon">${typeIcon}</span>
                     <div class="absence-info">
-                        <div class="absence-name">${employee?.name || 'Unbekannt'}</div>
+                        <div class="absence-name">${employee?.name || 'Unbekannt'} ${statusPill}</div>
                         <div class="absence-dates">${typeLabel}: ${dateText}</div>
                         ${absence.note ? `<div class="absence-note">${absence.note}</div>` : ''}
+                        ${absence.responseReason ? `<div class="absence-note">Grund: ${absence.responseReason}</div>` : ''}
                     </div>
                     ${isActive ? '<span class="absence-status">Aktuell</span>' : ''}
                 </div>

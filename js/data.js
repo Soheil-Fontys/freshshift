@@ -32,6 +32,7 @@ const DataManager = {
         this.seedDefaultEmployees();
         this.migrateAvailabilities();
         this.migrateSchedules();
+        this.migrateAbsences();
     },
 
     seedDefaultEmployees() {
@@ -314,6 +315,24 @@ const DataManager = {
     // ===========================
     // Absence Management (Urlaub/Krankheit)
     // ===========================
+    migrateAbsences() {
+        const absences = this.getAbsences();
+        if (!absences.length) return;
+
+        let changed = false;
+        absences.forEach(a => {
+            if (!a) return;
+            if (!a.status) {
+                a.status = 'approved';
+                changed = true;
+            }
+        });
+
+        if (changed) {
+            localStorage.setItem(this.KEYS.ABSENCES, JSON.stringify(absences));
+        }
+    },
+
     getAbsences() {
         const data = localStorage.getItem(this.KEYS.ABSENCES);
         return data ? JSON.parse(data) : [];
@@ -346,16 +365,18 @@ const DataManager = {
     isEmployeeAbsent(employeeId, date) {
         const dateStr = date.toISOString().split('T')[0];
         return this.getAbsences().some(a => 
-            a.employeeId === employeeId && 
+            a.employeeId === employeeId &&
+            (a.status || 'approved') === 'approved' &&
             dateStr >= a.startDate && 
             dateStr <= a.endDate
         );
     },
-
+ 
     getEmployeeAbsenceForDate(employeeId, date) {
         const dateStr = date.toISOString().split('T')[0];
         return this.getAbsences().find(a => 
-            a.employeeId === employeeId && 
+            a.employeeId === employeeId &&
+            (a.status || 'approved') === 'approved' &&
             dateStr >= a.startDate && 
             dateStr <= a.endDate
         );
@@ -365,6 +386,7 @@ const DataManager = {
         const absences = this.getAbsences();
         absence.id = Date.now().toString();
         absence.createdAt = new Date().toISOString();
+        if (!absence.status) absence.status = 'approved';
         absences.push(absence);
         localStorage.setItem(this.KEYS.ABSENCES, JSON.stringify(absences));
         return absence;
@@ -404,6 +426,19 @@ const DataManager = {
 
     getUnreadNotifications() {
         return this.getNotifications().filter(n => !n.read);
+    },
+
+    getUnreadNotificationsForEmployee(employeeId) {
+        return this.getUnreadNotifications().filter(n => n.target === 'employee' && n.targetEmployeeId === employeeId);
+    },
+
+    markNotificationRead(id) {
+        const notifications = this.getNotifications();
+        const n = notifications.find(x => x.id === id);
+        if (n) {
+            n.read = true;
+            localStorage.setItem(this.KEYS.NOTIFICATIONS, JSON.stringify(notifications));
+        }
     },
 
     markNotificationsRead() {

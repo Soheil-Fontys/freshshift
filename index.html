@@ -104,6 +104,7 @@
                     <li><button class="menu-item active" data-page="dashboard">Startseite</button></li>
                     <li><button class="menu-item" data-page="availability">Verfügbarkeit eintragen</button></li>
                     <li><button class="menu-item" data-page="schedule">Mein Schichtplan</button></li>
+                    <li><button class="menu-item" data-page="absences">Urlaub/Krank melden</button></li>
                 </ul>
                 <div class="menu-footer">
                     <button id="menu-logout" class="btn btn-secondary btn-full">Abmelden</button>
@@ -225,6 +226,16 @@
                     <div id="schedule-status" class="schedule-status"></div>
                     <div id="my-schedule-content" class="my-schedule-content"></div>
                     <div id="weekly-summary" class="weekly-summary"></div>
+                </div>
+
+                <!-- Employee Absences Page -->
+                <div id="page-absences" class="page-content">
+                    <div class="page-header-with-action">
+                        <h3>Urlaub / Krankheit</h3>
+                        <button id="request-absence-btn" class="btn btn-primary btn-small">+ Neu</button>
+                    </div>
+                    <p class="helper-text">Urlaub wird als Anfrage an die Geschäftsleitung gesendet. Krankheit wird sofort eingetragen (Info an Admin).</p>
+                    <div id="employee-absences-list" class="absences-list"></div>
                 </div>
             </div>
         </div>
@@ -693,6 +704,45 @@
                     <button class="btn btn-secondary modal-cancel">Abbrechen</button>
                     <button class="btn btn-secondary" id="copy-week-skip">Ohne Konflikte kopieren</button>
                     <button class="btn btn-primary" id="copy-week-all">Trotzdem alles kopieren</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Absence Request Modal (Employee) -->
+        <div id="absence-request-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Abwesenheit melden</h3>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p class="modal-info">Urlaub = Anfrage. Krankheit = sofort eintragen.</p>
+                    <div class="form-group">
+                        <label for="absence-request-type">Art</label>
+                        <select id="absence-request-type">
+                            <option value="urlaub">Urlaub (Anfrage)</option>
+                            <option value="krank">Krankheit</option>
+                            <option value="sonstiges">Sonstiges</option>
+                        </select>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="absence-request-start">Von</label>
+                            <input type="date" id="absence-request-start">
+                        </div>
+                        <div class="form-group">
+                            <label for="absence-request-end">Bis</label>
+                            <input type="date" id="absence-request-end">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="absence-request-note">Bemerkung (optional)</label>
+                        <input type="text" id="absence-request-note" placeholder="z.B. Familienurlaub / Arzt" />
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary modal-cancel">Abbrechen</button>
+                    <button class="btn btn-primary" id="submit-absence-request">Senden</button>
                 </div>
             </div>
         </div>
