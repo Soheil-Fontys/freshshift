@@ -861,19 +861,25 @@ const App = {
 
     currentDefaultAvailabilityEmployeeId: null,
 
-    async openInviteEmployee(employeeNameEncoded) {
+    async openInviteEmployee(employeeId, employeeNameEncoded) {
+        const id = String(employeeId || '').trim();
         const employeeName = decodeURIComponent(employeeNameEncoded || '').trim();
-        if (!employeeName) return;
+        if (!id || !employeeName) return;
 
         const email = prompt(`Email für ${employeeName}:`, '');
         if (!email) return;
 
         const token = await window.FreshShiftSupabase?.getAccessToken?.();
-        const client = window.FreshShiftSupabase?.ensureClient?.();
-        const url = (client ? client.supabaseUrl : (window.FRESHSHIFT_SUPABASE_URL || localStorage.getItem('freshshift_supabase_url') || ''));
+        const url = window.FRESHSHIFT_SUPABASE_URL || localStorage.getItem('freshshift_supabase_url') || '';
+        const anonKey = window.FRESHSHIFT_SUPABASE_ANON_KEY || localStorage.getItem('freshshift_supabase_anon_key') || '';
 
         if (!token || !url) {
             this.showToast('Cloud Login fehlt. Bitte zuerst per Email (Magic Link) verbinden.', 'error');
+            return;
+        }
+
+        if (!anonKey) {
+            this.showToast('Supabase Anon Key fehlt (Konfiguration).', 'error');
             return;
         }
 
@@ -882,9 +888,11 @@ const App = {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'apikey': anonKey,
                     'Authorization': `Bearer ${token}`
                 },
                 body: JSON.stringify({
+                    employeeId: id,
                     employeeName,
                     email,
                     redirectTo: window.location.origin + window.location.pathname
@@ -898,7 +906,8 @@ const App = {
 
             this.showToast(`Einladung gesendet an ${email}`, 'success');
         } catch (e) {
-            this.showToast(e?.message || 'Invite fehlgeschlagen', 'error');
+            const msg = e?.message || 'Invite fehlgeschlagen';
+            this.showToast(msg === 'Failed to fetch' ? 'Invite fehlgeschlagen (Netzwerk/CORS). Bitte Seite neu laden und erneut versuchen.' : msg, 'error');
         }
     },
 
@@ -2772,7 +2781,7 @@ const App = {
                             <span class="btn-icon-inline">⏱️</span> Standard
                         </button>
                         <button class="btn btn-secondary btn-small" onclick="App.openEditEmployeeModal('${emp.id}')">✎</button>
-                        <button class="btn btn-primary btn-small" onclick="App.openInviteEmployee('${encodeURIComponent(emp.name)}')">
+                        <button class="btn btn-primary btn-small" onclick="App.openInviteEmployee('${emp.id}', '${encodeURIComponent(emp.name)}')">
                             <span class="btn-icon-inline">✉️</span> Einladen
                         </button>
                         <button class="btn btn-danger btn-small btn-icon-only" onclick="App.deleteEmployee('${emp.id}')">✕</button>

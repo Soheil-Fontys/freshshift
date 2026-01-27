@@ -3,12 +3,13 @@
  * Enables offline functionality and caching
  */
 
-const CACHE_NAME = 'freshshift-v6';
+const CACHE_NAME = 'freshshift-v7';
 const STATIC_ASSETS = [
     './',
     './index.html',
     './css/styles.css',
     './js/data.js',
+    './js/supabase.js',
     './js/app.js',
     './manifest.json',
     './icons/pwa-icon-192.png',

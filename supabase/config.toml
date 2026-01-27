@@ -10,8 +10,12 @@ port = 54322
 port = 54323
 
 [auth]
-site_url = "http://192.168.178.68:3000"
-additional_redirect_urls = ["http://192.168.178.68:3000/*"]
+site_url = "https://freshshift.de"
+additional_redirect_urls = [
+  "https://freshshift.de/*",
+  "http://localhost:3000/*",
+  "http://127.0.0.1:3000/*"
+]
 
 [functions]
 [functions.invite-employee]
