@@ -131,7 +131,7 @@
 
         return Array.from(byId.values()).filter(schedule => {
             if (role === 'admin' || schedule.released) return true;
-            return Object.values(schedule.shifts).flat().some(shift => shift.requestStatus === 'pending');
+            return Object.values(schedule.shifts).flat().some(shift => shift.requestedAt);
         });
     }
 
