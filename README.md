@@ -6,8 +6,11 @@ Shift planning for Yes Fresh and Fresh Fries. Employees submit their weekly avai
 
 - **Employee Self-Service**: Employees can submit their weekly availability (Mon-Sat) with specific time slots
 - **Manual Schedule Planning**: Admins can prepare and release weekly schedules
+- **Release Safeguards**: Invalid times, absences, overlapping assignments, and unanswered shift requests are checked before release
 - **Admin Dashboard**: Review submitted availability, absences, requests, and schedules
 - **Personal Schedule View**: Each employee can view their assigned shifts after release
+- **Employee Lifecycle**: Archive former employees without losing historic schedules or monthly totals
+- **Automatic Refresh**: Visible dashboards refresh safely when returning to the app and during longer sessions
 - **Passwordless Login**: Invited employees and admins authenticate with Supabase Magic Links
 - **Responsive Design**: Works on desktop and mobile devices
 
@@ -43,7 +46,7 @@ Operational data is stored in Supabase. After authentication, the browser loads 
 
 Employee invitations run through the authenticated `invite-employee` Edge Function. Production employee records are restored separately and are deliberately excluded from Git history. Never expose a service-role key in browser code.
 
-Before deploying a new domain, add its URL to the Supabase Auth Site URL and Redirect URLs. Uninvited email addresses cannot create accounts from the login screen.
+Before deploying a new domain, add its URL to the Supabase Auth Site URL and Redirect URLs. Uninvited email addresses cannot create accounts from the login screen or by calling Supabase Auth directly. Employee actions and their admin notifications are committed together so a temporary browser disconnect cannot leave the UI and database out of sync.
 
 ## Business Rules
 
@@ -52,8 +55,9 @@ Before deploying a new domain, add its URL to the Supabase Auth Site URL and Red
 - **Fresh Fries**: Minimum 2 employees per day
 - **Breaks**: Reminder for shifts longer than 6 hours
 
-## Next Milestone
+## Production Checklist
 
-- Bootstrap the first admin and invite employee accounts
-- Add scheduling-rule validation and broader browser integration tests
-- Harden remaining dynamic HTML rendering before production rollout
+- Invite each active employee from the employee management page
+- Confirm each employee can open their Magic Link and see only their own data
+- Prepare a pilot week, resolve every shift request, and release the plan
+- Review the month overview after the first completed week

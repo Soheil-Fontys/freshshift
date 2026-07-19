@@ -54,6 +54,8 @@
             hourlyRate: row.hourly_rate === null ? null : Number(row.hourly_rate),
             profileId: row.profile_id,
             email: row.email,
+            active: row.active !== false,
+            archivedAt: row.archived_at || null,
             primaryStore: primary,
             stores: links.map(link => link.store_id),
             defaultAvailability: row.default_availability_json || {}
@@ -72,7 +74,7 @@
         };
     }
 
-    function mapShift(row) {
+    function mapShift(row, employees = cache.employees) {
         return {
             id: row.id,
             scheduleId: row.schedule_id,
@@ -80,6 +82,7 @@
             weekKey: row.week_key,
             dayKey: row.day_key,
             employeeId: row.employee_id,
+            employeeName: employees.find(employee => employee.id === row.employee_id)?.name || null,
             start: row.start,
             end: row.end,
             actualStart: row.actual_start,
@@ -92,7 +95,7 @@
         };
     }
 
-    function mapSchedules(scheduleRows, shiftRows) {
+    function mapSchedules(scheduleRows, shiftRows, employees = cache.employees) {
         const byId = new Map();
 
         scheduleRows.forEach(row => {
@@ -123,7 +126,7 @@
             }
 
             if (!schedule.shifts[row.day_key]) schedule.shifts[row.day_key] = [];
-            schedule.shifts[row.day_key].push(mapShift(row));
+            schedule.shifts[row.day_key].push(mapShift(row, employees));
         });
 
         return Array.from(byId.values()).filter(schedule => {
@@ -227,7 +230,7 @@
 
         const results = await Promise.all([
             supabase.from('stores').select('id,name').order('name'),
-            supabase.from('employees').select('id,name,type,hourly_rate,profile_id,email,default_availability_json').order('name'),
+            supabase.from('employees').select('id,name,type,hourly_rate,profile_id,email,active,archived_at,default_availability_json').order('name'),
             supabase.from('employee_stores').select('employee_id,store_id,is_primary'),
             supabase.from('availabilities').select('*'),
             supabase.from('schedules').select('*'),
@@ -239,17 +242,19 @@
         const [stores, employees, employeeStores, availabilities, schedules, shifts, absences, notifications] =
             results.map((result, index) => unwrap(result, `Cloud-Daten konnten nicht geladen werden (${index + 1}).`) || []);
 
+        const mappedEmployees = employees.map(row => mapEmployee(row, employeeStores));
+
         cache = {
             stores,
-            employees: employees.map(row => mapEmployee(row, employeeStores)),
+            employees: mappedEmployees,
             employeeStores,
             availabilities: availabilities.map(mapAvailability),
-            schedules: mapSchedules(schedules, shifts),
+            schedules: mapSchedules(schedules, shifts, mappedEmployees),
             absences: absences.map(mapAbsence),
             notifications: notifications.map(mapNotification)
         };
 
-        currentEmployee = cache.employees.find(employee => employee.profileId === user.id) || null;
+        currentEmployee = cache.employees.find(employee => employee.profileId === user.id && employee.active) || null;
         return { role, profile, user, employee: currentEmployee };
     }
 
@@ -276,8 +281,14 @@
             return { role, profile, user: authUser, employee: currentEmployee };
         },
 
-        getEmployees() {
-            return cache.employees;
+        getEmployees(options = {}) {
+            return options.includeInactive
+                ? cache.employees
+                : cache.employees.filter(employee => employee.active);
+        },
+
+        getArchivedEmployees() {
+            return cache.employees.filter(employee => !employee.active);
         },
 
         getEmployee(id) {
@@ -295,34 +306,24 @@
             const stores = Array.from(new Set(employee.stores || [employee.primaryStore])).filter(Boolean);
             const primaryStore = employee.primaryStore || stores[0];
 
-            const inserted = unwrap(await supabase
-                .from('employees')
-                .insert({
-                    name: employee.name,
-                    type: employee.type,
-                    hourly_rate: employee.hourlyRate,
-                    default_availability_json: employee.defaultAvailability || {}
-                })
-                .select()
-                .single(), 'Mitarbeiter konnte nicht angelegt werden.');
+            const savedId = unwrap(await supabase.rpc('save_employee', {
+                p_employee_id: null,
+                p_name: employee.name,
+                p_type: employee.type,
+                p_hourly_rate: employee.hourlyRate,
+                p_default_availability: employee.defaultAvailability || {},
+                p_store_ids: stores,
+                p_primary_store: primaryStore
+            }), 'Mitarbeiter konnte nicht angelegt werden.');
 
-            const links = stores.map(storeId => ({
-                employee_id: inserted.id,
-                store_id: storeId,
-                is_primary: storeId === primaryStore
-            }));
-
-            try {
-                if (links.length) {
-                    unwrap(await supabase.from('employee_stores').insert(links), 'Geschäftszuordnung konnte nicht gespeichert werden.');
-                }
-            } catch (error) {
-                await supabase.from('employees').delete().eq('id', inserted.id);
-                throw error;
-            }
-
+            const [employeeResult, linksResult] = await Promise.all([
+                supabase.from('employees').select('*').eq('id', savedId).single(),
+                supabase.from('employee_stores').select('employee_id,store_id,is_primary').eq('employee_id', savedId)
+            ]);
+            const inserted = unwrap(employeeResult, 'Mitarbeiter konnte nicht neu geladen werden.');
+            const links = unwrap(linksResult, 'Geschäftszuordnung konnte nicht neu geladen werden.') || [];
             cache.employeeStores.push(...links);
-            const mapped = mapEmployee(inserted, cache.employeeStores);
+            const mapped = mapEmployee(inserted, links);
             cache.employees.push(mapped);
             return mapped;
         },
@@ -337,27 +338,22 @@
             const stores = Array.from(new Set(merged.stores || [merged.primaryStore])).filter(Boolean);
             const primaryStore = merged.primaryStore || stores[0];
 
-            const updated = unwrap(await supabase
-                .from('employees')
-                .update({
-                    name: merged.name,
-                    type: merged.type,
-                    hourly_rate: merged.hourlyRate,
-                    default_availability_json: merged.defaultAvailability || {}
-                })
-                .eq('id', merged.id)
-                .select()
-                .single(), 'Mitarbeiter konnte nicht gespeichert werden.');
+            const savedId = unwrap(await supabase.rpc('save_employee', {
+                p_employee_id: merged.id,
+                p_name: merged.name,
+                p_type: merged.type,
+                p_hourly_rate: merged.hourlyRate,
+                p_default_availability: merged.defaultAvailability || {},
+                p_store_ids: stores,
+                p_primary_store: primaryStore
+            }), 'Mitarbeiter konnte nicht gespeichert werden.');
 
-            unwrap(await supabase.from('employee_stores').delete().eq('employee_id', merged.id), 'Geschäftszuordnung konnte nicht aktualisiert werden.');
-            const links = stores.map(storeId => ({
-                employee_id: merged.id,
-                store_id: storeId,
-                is_primary: storeId === primaryStore
-            }));
-            if (links.length) {
-                unwrap(await supabase.from('employee_stores').insert(links), 'Geschäftszuordnung konnte nicht gespeichert werden.');
-            }
+            const [employeeResult, linksResult] = await Promise.all([
+                supabase.from('employees').select('*').eq('id', savedId).single(),
+                supabase.from('employee_stores').select('employee_id,store_id,is_primary').eq('employee_id', savedId)
+            ]);
+            const updated = unwrap(employeeResult, 'Mitarbeiter konnte nicht neu geladen werden.');
+            const links = unwrap(linksResult, 'Geschäftszuordnung konnte nicht neu geladen werden.') || [];
 
             cache.employeeStores = cache.employeeStores.filter(link => link.employee_id !== merged.id);
             cache.employeeStores.push(...links);
@@ -369,9 +365,23 @@
 
         async deleteEmployee(id) {
             requireAdmin();
-            unwrap(await requireClient().from('employees').delete().eq('id', id), 'Mitarbeiter konnte nicht gelöscht werden.');
-            cache.employees = cache.employees.filter(employee => employee.id !== id);
-            cache.employeeStores = cache.employeeStores.filter(link => link.employee_id !== id);
+            unwrap(await requireClient().rpc('archive_employee', { p_employee_id: id }), 'Mitarbeiter konnte nicht archiviert werden.');
+            const employee = cache.employees.find(item => item.id === id);
+            if (employee) {
+                employee.active = false;
+                employee.archivedAt = new Date().toISOString();
+            }
+        },
+
+        async restoreEmployee(id) {
+            requireAdmin();
+            unwrap(await requireClient().rpc('restore_employee', { p_employee_id: id }), 'Mitarbeiter konnte nicht wiederhergestellt werden.');
+            const employee = cache.employees.find(item => item.id === id);
+            if (employee) {
+                employee.active = true;
+                employee.archivedAt = null;
+            }
+            return employee || null;
         },
 
         getAvailabilities() {
@@ -421,21 +431,19 @@
             const savedSchedule = unwrap(scheduleResult, 'Schichtplan konnte nicht neu geladen werden.');
             const savedShifts = unwrap(shiftsResult, 'Schichten konnten nicht neu geladen werden.') || [];
 
-            const mapped = mapSchedules([savedSchedule], savedShifts)[0];
+            const mapped = mapSchedules([savedSchedule], savedShifts, cache.employees)[0];
             replaceById(cache.schedules, mapped);
             return mapped;
         },
 
         async releaseSchedule(weekKey, storeId) {
             requireAdmin();
-            const releasedAt = new Date().toISOString();
-            const row = unwrap(await requireClient()
-                .from('schedules')
-                .update({ released: true, released_at: releasedAt })
-                .eq('week_key', weekKey)
-                .eq('store_id', this.normalizeStoreId(storeId))
-                .select()
-                .single(), 'Schichtplan konnte nicht freigegeben werden.');
+            const supabase = requireClient();
+            const scheduleId = unwrap(await supabase.rpc('release_schedule', {
+                p_week_key: weekKey,
+                p_store_id: this.normalizeStoreId(storeId)
+            }), 'Schichtplan konnte nicht freigegeben werden.');
+            const row = unwrap(await supabase.from('schedules').select('*').eq('id', scheduleId).single(), 'Schichtplan konnte nicht neu geladen werden.');
 
             const existing = cache.schedules.find(schedule => schedule.id === row.id);
             if (existing) {

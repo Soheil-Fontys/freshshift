@@ -11,6 +11,33 @@ const App = {
 
     adminStore: 'fresh_fries',
     employeeStore: 'fresh_fries',
+    cloudRefreshTimer: null,
+    cloudRefreshInFlight: false,
+    lastCloudRefreshAt: 0,
+
+    escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, character => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        })[character]);
+    },
+
+    encodeActionData(value) {
+        return encodeURIComponent(String(value ?? '')).replace(/'/g, '%27');
+    },
+
+    cloneSchedule(schedule) {
+        if (!schedule) return null;
+        if (typeof structuredClone === 'function') return structuredClone(schedule);
+        return JSON.parse(JSON.stringify(schedule));
+    },
+
+    getEmployeeName(employeeId, fallback = 'Unbekannt') {
+        return DataManager.getEmployee(employeeId)?.name || fallback;
+    },
 
 
     async init() {
@@ -27,6 +54,7 @@ const App = {
 
         try {
             await window.FreshShiftSupabase.init((event, session) => this.handleAuthStateChange(event, session));
+            this.startBackgroundRefresh();
         } catch (error) {
             this.setAuthStatus(error?.message || 'Cloud-Verbindung fehlgeschlagen.', true);
         }
@@ -53,6 +81,7 @@ const App = {
 
         try {
             const context = await DataManager.connectToCloud(window.FreshShiftSupabase.ensureClient());
+            this.lastCloudRefreshAt = Date.now();
             this.populateAdminStoreSelect();
 
             if (context.role === 'admin') {
@@ -90,6 +119,55 @@ const App = {
         status.classList.toggle('login-error', Boolean(isError));
     },
 
+    startBackgroundRefresh() {
+        if (this.cloudRefreshTimer) return;
+
+        const refreshWhenVisible = () => {
+            if (document.visibilityState === 'visible') this.refreshCloudData();
+        };
+
+        window.addEventListener('focus', refreshWhenVisible);
+        document.addEventListener('visibilitychange', refreshWhenVisible);
+        this.cloudRefreshTimer = window.setInterval(refreshWhenVisible, 2 * 60 * 1000);
+    },
+
+    async refreshCloudData(force = false) {
+        const authContext = DataManager.getAuthContext?.();
+        if (!authContext?.user || this.cloudRefreshInFlight) return;
+        if (!force && Date.now() - this.lastCloudRefreshAt < 30 * 1000) return;
+        if (!force && document.querySelector('.modal.active')) return;
+
+        this.cloudRefreshInFlight = true;
+        try {
+            const context = await DataManager.reloadCloudData();
+            this.lastCloudRefreshAt = Date.now();
+
+            if (context.role === 'admin' && document.getElementById('admin-screen')?.classList.contains('active')) {
+                this.populateAdminStoreSelect();
+                const activePage = document.querySelector('#admin-screen .page-content.active')?.id;
+                if (activePage === 'page-admin-planner') this.renderAdminView();
+                else if (activePage === 'page-admin-availability') this.renderAdminAvailability();
+                else if (activePage === 'page-admin-month') this.renderMonthOverview();
+                else if (activePage === 'page-admin-employees') this.renderEmployeesTab();
+                else if (activePage === 'page-admin-data') this.renderAdminDataPage();
+                else this.renderAdminDashboard();
+                this.updateAdminNotifications();
+            } else if (context.employee && document.getElementById('dashboard-screen')?.classList.contains('active')) {
+                this.currentUser = context.employee;
+                const activePage = document.querySelector('#dashboard-screen .page-content.active')?.id;
+                if (activePage === 'page-availability') this.renderAvailabilityForm();
+                else if (activePage === 'page-schedule') this.renderMyScheduleSection();
+                else if (activePage === 'page-absences') this.renderEmployeeAbsencesPage();
+                else this.renderDashboard();
+            }
+        } catch (error) {
+            if (force) this.showToast(error?.message || 'Daten konnten nicht aktualisiert werden.', 'error');
+            else console.warn('FreshShift background refresh failed', error);
+        } finally {
+            this.cloudRefreshInFlight = false;
+        }
+    },
+
     async sendAuthLink() {
         const email = document.getElementById('auth-email')?.value || '';
         const button = document.getElementById('auth-send-link');
@@ -125,7 +203,7 @@ const App = {
         
         // Dashboard Menu Items
         document.querySelectorAll('#side-menu .menu-item').forEach(item => {
-            item.addEventListener('click', (e) => this.navigateTo(e.target.dataset.page));
+            item.addEventListener('click', (e) => this.navigateTo(e.currentTarget.dataset.page));
         });
 
         // Dashboard Quick Actions
@@ -183,7 +261,7 @@ const App = {
         
         // Admin Menu Items
         document.querySelectorAll('#admin-side-menu .menu-item').forEach(item => {
-            item.addEventListener('click', (e) => this.navigateAdminTo(e.target.dataset.page));
+            item.addEventListener('click', (e) => this.navigateAdminTo(e.currentTarget.dataset.page));
         });
 
         // Admin Planner
@@ -379,12 +457,18 @@ const App = {
         // Rows
         employees.forEach(emp => {
             const avail = availabilities.find(a => a.employeeId === emp.id);
-            html += `<tr><td class="name-cell">${emp.name}</td>`;
+            const generalNote = avail?.notes
+                ? `<span class="availability-note">${this.escapeHtml(avail.notes)}</span>`
+                : '';
+            html += `<tr><td class="name-cell">${this.escapeHtml(emp.name)}${generalNote}</td>`;
             
             DateUtils.DAY_KEYS.forEach(dayKey => {
                 const day = avail?.days?.[dayKey];
-                if (day?.available) {
-                    html += `<td class="available-cell">${day.start}–${day.end}</td>`;
+                if (day?.available && this.timeRange(day.start, day.end)) {
+                    const dayNote = day.notes
+                        ? `<span class="availability-note">${this.escapeHtml(day.notes)}</span>`
+                        : '';
+                    html += `<td class="available-cell"><span>${this.escapeHtml(day.start)}–${this.escapeHtml(day.end)}</span>${dayNote}</td>`;
                 } else {
                     html += `<td class="unavailable-cell">–</td>`;
                 }
@@ -404,8 +488,8 @@ const App = {
                 const pills = DateUtils.DAY_KEYS.map((dayKey, index) => {
                     const day = avail?.days?.[dayKey];
                     const label = DateUtils.DAYS_SHORT[index];
-                    if (day?.available) {
-                        return `<div class="avail-pill available"><span class="d">${label}</span><span class="t">${day.start}–${day.end}</span></div>`;
+                    if (day?.available && this.timeRange(day.start, day.end)) {
+                        return `<div class="avail-pill available"><span class="d">${label}</span><span class="t">${this.escapeHtml(day.start)}–${this.escapeHtml(day.end)}</span>${day.notes ? `<span class="n">${this.escapeHtml(day.notes)}</span>` : ''}</div>`;
                     }
                     return `<div class="avail-pill unavailable"><span class="d">${label}</span><span class="t">–</span></div>`;
                 }).join('');
@@ -413,9 +497,10 @@ const App = {
                 return `
                     <div class="availability-card">
                         <div class="availability-card-header">
-                            <div class="name">${emp.name}</div>
-                            <div class="sub">${DataManager.getStoreName(this.adminStore)} · ${DateUtils.formatWeekDisplay(this.availWeek)}</div>
+                            <div class="name">${this.escapeHtml(emp.name)}</div>
+                            <div class="sub">${this.escapeHtml(DataManager.getStoreName(this.adminStore))} · ${DateUtils.formatWeekDisplay(this.availWeek)}</div>
                         </div>
+                        ${avail?.notes ? `<div class="availability-general-note">${this.escapeHtml(avail.notes)}</div>` : ''}
                         <div class="availability-grid">${pills}</div>
                     </div>
                 `;
@@ -436,7 +521,7 @@ const App = {
         const storeEl = document.getElementById('menu-user-stores');
         if (storeEl) {
             const stores = this.getUserStores();
-            storeEl.innerHTML = stores.map(s => `<span class="store-chip">${DataManager.getStoreName(s)}</span>`).join('');
+            storeEl.innerHTML = stores.map(s => `<span class="store-chip">${this.escapeHtml(DataManager.getStoreName(s))}</span>`).join('');
         }
         
         // Render all dashboard components
@@ -473,12 +558,12 @@ const App = {
                 const hours = DateUtils.calculateDuration(shift.start, shift.end);
                 container.innerHTML = `
                     <div class="shift-time-big">${shift.start} – ${shift.end}</div>
-                    <div class="shift-duration">${DateUtils.formatDuration(hours)} · ${DataManager.getStoreName(storeId)}${shift.requestStatus === 'pending' ? ' · Anfrage' : ''}</div>
+                    <div class="shift-duration">${DateUtils.formatDuration(hours)} · ${this.escapeHtml(DataManager.getStoreName(storeId))}${shift.requestStatus === 'pending' ? ' · Anfrage' : ''}</div>
                 `;
             } else {
                 container.innerHTML = myShifts.map(({ storeId, shift }) => {
                     const hours = DateUtils.calculateDuration(shift.start, shift.end);
-                    return `<div class="today-multi-shift"><strong>${DataManager.getStoreName(storeId)}:</strong> ${shift.start} – ${shift.end} <span class="muted">(${DateUtils.formatDuration(hours)})</span></div>`;
+                    return `<div class="today-multi-shift"><strong>${this.escapeHtml(DataManager.getStoreName(storeId))}:</strong> ${shift.start} – ${shift.end} <span class="muted">(${DateUtils.formatDuration(hours)})</span></div>`;
                 }).join('');
             }
         } else {
@@ -550,7 +635,7 @@ const App = {
 
             const summary = `${storeName} · ${DateUtils.DAYS_SHORT[req.dayIndex]} ${dateText} · ${timeText}`;
 
-            const payload = encodeURIComponent(JSON.stringify({
+            const payload = this.encodeActionData(JSON.stringify({
                 storeId: req.storeId,
                 weekKey: req.weekKey,
                 dayKey: req.dayKey,
@@ -560,13 +645,13 @@ const App = {
             return `
                 <div class="request-item">
                     <div>
-                        <div class="request-title">${storeName}</div>
+                        <div class="request-title">${this.escapeHtml(storeName)}</div>
                         <div class="request-sub">${DateUtils.DAYS_SHORT[req.dayIndex]} · ${dateText} · ${timeText}</div>
                         <div class="request-badge">⏳ Anfrage offen</div>
                     </div>
                     <div class="request-actions">
                         <button class="btn btn-success btn-small" onclick="App.acceptShiftRequest('${payload}')">Annehmen</button>
-                        <button class="btn btn-danger btn-small" onclick="App.openDeclineShiftRequest('${payload}', '${encodeURIComponent(summary)}')">Ablehnen</button>
+                        <button class="btn btn-danger btn-small" onclick="App.openDeclineShiftRequest('${payload}', '${this.encodeActionData(summary)}')">Ablehnen</button>
                     </div>
                 </div>
             `;
@@ -577,6 +662,92 @@ const App = {
         const n = Number(amount);
         if (!Number.isFinite(n)) return '–';
         return n.toLocaleString('de-DE', { style: 'currency', currency: 'EUR' });
+    },
+
+    timeRange(start, end) {
+        const parse = value => {
+            if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(String(value || ''))) return null;
+            const [hours, minutes] = value.split(':').map(Number);
+            return (hours * 60) + minutes;
+        };
+        const startMinutes = parse(start);
+        let endMinutes = parse(end);
+        if (startMinutes === null || endMinutes === null || startMinutes === endMinutes) return null;
+        if (endMinutes < startMinutes) endMinutes += 24 * 60;
+        return { start: startMinutes, end: endMinutes };
+    },
+
+    timeRangesOverlap(first, second) {
+        if (!first || !second) return false;
+        const variants = [second, { start: second.start + 1440, end: second.end + 1440 }];
+        return variants.some(candidate => first.start < candidate.end && candidate.start < first.end);
+    },
+
+    isShiftWithinAvailability(start, end, availability) {
+        if (!availability?.available) return false;
+        const shiftRange = this.timeRange(start, end);
+        const availabilityRange = this.timeRange(availability.start, availability.end);
+        if (!shiftRange || !availabilityRange) return false;
+        return shiftRange.start >= availabilityRange.start && shiftRange.end <= availabilityRange.end;
+    },
+
+    validateScheduleForRelease(schedule, storeId, weekDate = this.currentWeek) {
+        const errors = [];
+        const warnings = [];
+        const dates = DateUtils.getWeekDates(weekDate);
+        const weekKey = DateUtils.getWeekKey(weekDate);
+        const shifts = Object.values(schedule?.shifts || {}).flat();
+
+        if (shifts.length === 0) {
+            errors.push('Der Plan enthält keine Schichten.');
+        }
+
+        DateUtils.DAY_KEYS.forEach((dayKey, dayIndex) => {
+            const dayShifts = schedule?.shifts?.[dayKey] || [];
+            dayShifts.forEach(shift => {
+                const employee = DataManager.getEmployee(shift.employeeId);
+                const name = employee?.name || 'Unbekannter Mitarbeiter';
+                const shiftRange = this.timeRange(shift.start, shift.end);
+
+                if (!employee?.active) {
+                    errors.push(`${name} ist nicht mehr aktiv.`);
+                }
+                if (!shiftRange) {
+                    errors.push(`${name} hat am ${DateUtils.DAYS_SHORT[dayIndex]} ungültige Zeiten.`);
+                }
+                if (DataManager.getEmployeeAbsenceForDate(shift.employeeId, dates[dayIndex])) {
+                    errors.push(`${name} ist am ${DateUtils.DAYS_SHORT[dayIndex]} als abwesend eingetragen.`);
+                }
+                if (shift.requestStatus === 'pending') {
+                    errors.push(`${name}: Die Schichtanfrage am ${DateUtils.DAYS_SHORT[dayIndex]} ist noch offen.`);
+                } else if (shift.requestStatus === 'declined') {
+                    errors.push(`${name}: Die Schicht am ${DateUtils.DAYS_SHORT[dayIndex]} wurde abgelehnt.`);
+                } else if (shift.requestStatus !== 'accepted') {
+                    const availability = DataManager.getEmployeeAvailability(shift.employeeId, weekKey, storeId)
+                        ?.days?.[dayKey];
+                    if (!this.isShiftWithinAvailability(shift.start, shift.end, availability)) {
+                        warnings.push(`${name}: ${DateUtils.DAYS_SHORT[dayIndex]} liegt außerhalb der Verfügbarkeit.`);
+                    }
+                }
+
+                DataManager.getSchedules()
+                    .filter(other => other.weekKey === weekKey && other.storeId !== storeId)
+                    .forEach(other => {
+                        (other.shifts?.[dayKey] || [])
+                            .filter(otherShift => otherShift.employeeId === shift.employeeId && otherShift.requestStatus !== 'declined')
+                            .forEach(otherShift => {
+                                if (this.timeRangesOverlap(shiftRange, this.timeRange(otherShift.start, otherShift.end))) {
+                                    errors.push(`${name} ist am ${DateUtils.DAYS_SHORT[dayIndex]} gleichzeitig bei ${DataManager.getStoreName(other.storeId)} eingeplant.`);
+                                }
+                            });
+                    });
+            });
+        });
+
+        return {
+            errors: [...new Set(errors)],
+            warnings: [...new Set(warnings)]
+        };
     },
 
     renderMonthlyEarnings() {
@@ -611,7 +782,7 @@ const App = {
         const rows = breakdown.length > 1
             ? `<div class="earnings-breakdown">${breakdown.map(x => `
                 <div class="earnings-row">
-                    <span>${DataManager.getStoreName(x.storeId)}</span>
+                    <span>${this.escapeHtml(DataManager.getStoreName(x.storeId))}</span>
                     <span class="muted">${x.hours.toFixed(1)}h · ${this.formatCurrencyEUR(x.amount)}</span>
                 </div>
             `).join('')}</div>`
@@ -681,17 +852,6 @@ const App = {
 
         await DataManager.respondToShiftRequest(shift.id, status, reason);
 
-        const employee = DataManager.getEmployee(employeeId);
-        await DataManager.addNotification({
-            target: 'admin',
-            type: 'shift_request_response',
-            storeId,
-            employeeId,
-            employeeName: employee?.name || 'Unbekannt',
-            message: status === 'accepted' ? 'Schichtanfrage angenommen' : 'Schichtanfrage abgelehnt',
-            reason: reason || null
-        });
-
         // Re-render UI
         this.renderShiftRequests();
         this.renderMyScheduleSection();
@@ -736,7 +896,7 @@ const App = {
                 return;
             }
 
-            const reason = prompt('Grund für Ablehnung (optional):', '');
+            const reason = (prompt('Grund für Ablehnung (optional):', '') || '').trim().slice(0, 2000);
 
             await DataManager.updateAbsence({
                 id: absenceId,
@@ -784,7 +944,7 @@ const App = {
             const statusLabel = status === 'pending' ? 'Wartet' : status === 'declined' ? 'Abgelehnt' : 'Bestätigt';
 
             const statusPill = `<span class="absence-pill ${status}">${statusLabel}</span>`;
-            const reason = a.responseReason ? `<div class="absence-note">Grund: ${a.responseReason}</div>` : '';
+            const reason = a.responseReason ? `<div class="absence-note">Grund: ${this.escapeHtml(a.responseReason)}</div>` : '';
 
             return `
                 <div class="absence-item ${status === 'pending' ? 'absence-active' : ''}">
@@ -792,7 +952,7 @@ const App = {
                     <div class="absence-info">
                         <div class="absence-name">${typeLabel} ${statusPill}</div>
                         <div class="absence-dates">${dateText}</div>
-                        ${a.note ? `<div class="absence-note">${a.note}</div>` : ''}
+                        ${a.note ? `<div class="absence-note">${this.escapeHtml(a.note)}</div>` : ''}
                         ${reason}
                     </div>
                 </div>
@@ -836,11 +996,11 @@ const App = {
                     <div class="default-time-row" id="def_${dayKey}_times" style="${available ? '' : 'display:none'}">
                         <div class="form-group">
                             <label>Von</label>
-                            <input type="time" id="def_${dayKey}_start" value="${start}" step="60" class="time-input-24h" />
+                            <input type="time" id="def_${dayKey}_start" value="${this.escapeHtml(start)}" step="60" class="time-input-24h" />
                         </div>
                         <div class="form-group">
                             <label>Bis</label>
-                            <input type="time" id="def_${dayKey}_end" value="${end}" step="60" class="time-input-24h" />
+                            <input type="time" id="def_${dayKey}_end" value="${this.escapeHtml(end)}" step="60" class="time-input-24h" />
                         </div>
                     </div>
                 </div>
@@ -857,15 +1017,26 @@ const App = {
 
         const storeId = this.adminStore;
         const days = {};
+        let validationMessage = null;
 
         DateUtils.DAY_KEYS.forEach(dayKey => {
             const available = document.getElementById(`def_${dayKey}_available`)?.checked || false;
+            const start = available ? (document.getElementById(`def_${dayKey}_start`)?.value || '') : null;
+            const end = available ? (document.getElementById(`def_${dayKey}_end`)?.value || '') : null;
+            if (available && (!start || !end || start === end)) {
+                validationMessage = `${DateUtils.DAYS[DateUtils.DAY_KEYS.indexOf(dayKey)]}: Bitte gültige, unterschiedliche Zeiten eingeben.`;
+            }
             days[dayKey] = {
                 available,
-                start: available ? (document.getElementById(`def_${dayKey}_start`)?.value || '10:00') : null,
-                end: available ? (document.getElementById(`def_${dayKey}_end`)?.value || '20:00') : null
+                start,
+                end
             };
         });
+
+        if (validationMessage) {
+            this.showToast(validationMessage, 'error');
+            return;
+        }
 
         const merged = {
             ...(employee.defaultAvailability || {}),
@@ -911,8 +1082,12 @@ const App = {
         const employeeName = decodeURIComponent(employeeNameEncoded || '').trim();
         if (!id || !employeeName) return;
 
-        const email = prompt(`Email für ${employeeName}:`, '');
+        const email = (prompt(`Email für ${employeeName}:`, '') || '').trim().toLowerCase();
         if (!email) return;
+        if (email.length > 254 || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+            this.showToast('Bitte eine gültige Email-Adresse eingeben.', 'error');
+            return;
+        }
 
         try {
             await window.FreshShiftSupabase.invoke('invite-employee', {
@@ -933,7 +1108,7 @@ const App = {
     openAbsenceRequestModal() {
         if (!this.currentUser) return;
 
-        const today = new Date().toISOString().split('T')[0];
+        const today = DateUtils.formatDateKey(new Date());
         const start = document.getElementById('absence-request-start');
         const end = document.getElementById('absence-request-end');
         const type = document.getElementById('absence-request-type');
@@ -967,7 +1142,7 @@ const App = {
         const status = type === 'krank' ? 'approved' : 'pending';
 
         try {
-            const absence = await DataManager.addAbsence({
+            await DataManager.addAbsence({
                 employeeId: this.currentUser.id,
                 storeId: this.employeeStore,
                 startDate,
@@ -977,18 +1152,6 @@ const App = {
                 status,
                 requestedBy: 'employee',
                 requestedAt: new Date().toISOString()
-            });
-
-            const typeLabel = type === 'urlaub' ? 'Urlaub' : type === 'krank' ? 'Krankheit' : 'Sonstiges';
-            await DataManager.addNotification({
-                target: 'admin',
-                type: type === 'krank' ? 'absence_notice' : 'absence_request',
-                storeId: this.employeeStore,
-                employeeId: this.currentUser.id,
-                employeeName: this.currentUser.name,
-                absenceId: absence.id,
-                message: `${typeLabel}: ${startDate}${endDate !== startDate ? ' bis ' + endDate : ''}`,
-                reason: note || null
             });
 
             this.hideModals();
@@ -1102,7 +1265,7 @@ const App = {
                     </div>
                     <div class="shift-info">
                         <div class="time">${item.shift.start} – ${item.shift.end}</div>
-                        <div class="duration">${DateUtils.formatDuration(hours)} · ${DataManager.getStoreName(item.storeId)}</div>
+                        <div class="duration">${DateUtils.formatDuration(hours)} · ${this.escapeHtml(DataManager.getStoreName(item.storeId))}</div>
                     </div>
                 </div>
             `;
@@ -1208,7 +1371,7 @@ const App = {
         const absences = DataManager.getAbsences().filter(a => {
             const endDate = new Date(a.endDate);
             const startDate = new Date(a.startDate);
-            return endDate >= today && startDate <= futureDate;
+            return a.status === 'approved' && endDate >= today && startDate <= futureDate;
         }).sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
         
         if (absences.length === 0) {
@@ -1225,14 +1388,14 @@ const App = {
             const typeIcon = absence.type === 'urlaub' ? '🏖️' : 
                             absence.type === 'krank' ? '🤒' : '📅';
             
-            const dateText = startDate.toISOString().split('T')[0] === endDate.toISOString().split('T')[0]
+            const dateText = absence.startDate === absence.endDate
                 ? DateUtils.formatDate(startDate)
                 : `${DateUtils.formatDate(startDate)} – ${DateUtils.formatDate(endDate)}`;
             
             return `
                 <div class="admin-absence-item ${isActive ? 'active' : ''}">
                     <span class="absence-icon">${typeIcon}</span>
-                    <span class="absence-employee">${employee?.name || 'Unbekannt'}</span>
+                    <span class="absence-employee">${this.escapeHtml(employee?.name || 'Unbekannt')}</span>
                     <span class="absence-date">${dateText}</span>
                     ${isActive ? '<span class="absence-now">Jetzt</span>' : ''}
                 </div>
@@ -1270,7 +1433,7 @@ const App = {
         card.style.display = 'block';
         list.innerHTML = missing.map(emp => `
             <div class="missing-avail-item">
-                <span class="employee-name">${emp.name}</span>
+                <span class="employee-name">${this.escapeHtml(emp.name)}</span>
                 <span class="missing-label">Noch nicht eingereicht</span>
             </div>
         `).join('');
@@ -1321,7 +1484,8 @@ const App = {
     renderAdminTodayShifts(schedule, today) {
         const container = document.getElementById('admin-today-shifts');
         const todayKey = DateUtils.getTodayKey();
-        const todayShifts = schedule?.shifts?.[todayKey] || [];
+        const todayShifts = (schedule?.shifts?.[todayKey] || [])
+            .filter(shift => shift.requestStatus !== 'declined');
         
         if (todayShifts.length === 0) {
             container.innerHTML = '<div class="empty-today">Keine Schichten heute</div>';
@@ -1332,15 +1496,15 @@ const App = {
             let deviationBadge = '';
             if (shift.deviation) {
                 if (shift.deviation.lateMinutes) {
-                    deviationBadge = `<span class="deviation-badge late">+${shift.deviation.lateMinutes}m</span>`;
+                    deviationBadge = `<span class="deviation-badge late">+${this.escapeHtml(shift.deviation.lateMinutes)}m</span>`;
                 } else if (shift.deviation.earlyMinutes) {
-                    deviationBadge = `<span class="deviation-badge early">-${shift.deviation.earlyMinutes}m</span>`;
+                    deviationBadge = `<span class="deviation-badge early">-${this.escapeHtml(shift.deviation.earlyMinutes)}m</span>`;
                 }
             }
             
             return `
                 <div class="today-shift-item">
-                    <span class="shift-employee">${shift.employeeName}</span>
+                    <span class="shift-employee">${this.escapeHtml(this.getEmployeeName(shift.employeeId, shift.employeeName))}</span>
                     <span class="shift-time">${shift.start} – ${shift.end}</span>
                     ${deviationBadge}
                 </div>
@@ -1392,11 +1556,11 @@ const App = {
                 else if (n.type === 'absence_request') icon = '📅';
                 else if (n.type === 'absence_notice') icon = '🤒';
 
-                const titleName = n.employeeName ? `${n.employeeName}: ` : '';
+                const titleName = n.employeeName ? `${this.escapeHtml(n.employeeName)}: ` : '';
 
                 const needsAbsenceActions = n.type === 'absence_request' && n.absenceId;
                 const actions = needsAbsenceActions ? (() => {
-                    const payload = encodeURIComponent(JSON.stringify({ notificationId: n.id, absenceId: n.absenceId }));
+                    const payload = this.encodeActionData(JSON.stringify({ notificationId: n.id, absenceId: n.absenceId }));
                     return `
                         <div class="request-actions" style="margin-top: 8px; flex-direction: row;">
                             <button class="btn btn-success btn-small" onclick="App.approveAbsenceRequest('${payload}')">Genehmigen</button>
@@ -1406,11 +1570,11 @@ const App = {
                 })() : '';
 
                 return `
-                    <div class="notification-item ${n.type}">
+                    <div class="notification-item ${['early', 'late', 'shift_request_response', 'absence_request', 'absence_notice'].includes(n.type) ? n.type : 'info'}">
                         <span class="notification-icon">${icon}</span>
                         <div class="notification-content">
-                            <div class="notification-title">${titleName}${n.message}${n.storeId ? ` · ${DataManager.getStoreName(n.storeId)}` : ''}</div>
-                            ${n.reason ? `<div class="notification-reason">${n.type === 'shift_request_response' ? 'Info' : 'Grund'}: ${n.reason}</div>` : ''}
+                            <div class="notification-title">${titleName}${this.escapeHtml(n.message || '')}${n.storeId ? ` · ${this.escapeHtml(DataManager.getStoreName(n.storeId))}` : ''}</div>
+                            ${n.reason ? `<div class="notification-reason">${n.type === 'shift_request_response' ? 'Info' : 'Grund'}: ${this.escapeHtml(n.reason)}</div>` : ''}
                             <div class="notification-time">${this.formatTimestamp(n.timestamp)}</div>
                             ${actions}
                         </div>
@@ -1502,7 +1666,7 @@ const App = {
 
         const storeIds = Object.keys(DataManager.STORES);
         select.innerHTML = storeIds
-            .map(id => `<option value="${id}">${DataManager.getStoreName(id)}</option>`)
+            .map(id => `<option value="${this.escapeHtml(id)}">${this.escapeHtml(DataManager.getStoreName(id))}</option>`)
             .join('');
 
         select.value = this.adminStore;
@@ -1557,7 +1721,7 @@ const App = {
                 availRow.style.display = 'none';
             } else {
                 availRow.style.display = 'flex';
-                availSelect.innerHTML = stores.map(id => `<option value="${id}">${DataManager.getStoreName(id)}</option>`).join('');
+                availSelect.innerHTML = stores.map(id => `<option value="${this.escapeHtml(id)}">${this.escapeHtml(DataManager.getStoreName(id))}</option>`).join('');
                 if (!stores.includes(this.employeeStore)) this.employeeStore = stores[0];
                 availSelect.value = this.employeeStore;
             }
@@ -1580,7 +1744,7 @@ const App = {
                 scheduleRow.style.display = 'none';
             } else {
                 scheduleRow.style.display = 'flex';
-                scheduleSelect.innerHTML = visibleStores.map(id => `<option value="${id}">${DataManager.getStoreName(id)}</option>`).join('');
+                scheduleSelect.innerHTML = visibleStores.map(id => `<option value="${this.escapeHtml(id)}">${this.escapeHtml(DataManager.getStoreName(id))}</option>`).join('');
                 if (!visibleStores.includes(this.employeeStore)) this.employeeStore = primary;
                 scheduleSelect.value = this.employeeStore;
             }
@@ -1650,7 +1814,7 @@ const App = {
     // Report Late (Employee)
     // ===========================
     formatMinutesToTime(totalMinutes) {
-        const m = Math.max(0, Math.min(1439, Math.round(totalMinutes)));
+        const m = ((Math.round(totalMinutes) % 1440) + 1440) % 1440;
         const hh = String(Math.floor(m / 60)).padStart(2, '0');
         const mm = String(m % 60).padStart(2, '0');
         return `${hh}:${mm}`;
@@ -1671,29 +1835,32 @@ const App = {
             const shift = dayShifts.find(s => s.employeeId === this.currentUser.id);
             if (!schedule || !shift) continue;
 
-            const plannedStart = DateUtils.parseTimeToMinutes(shift.start);
-            const plannedEnd = DateUtils.parseTimeToMinutes(shift.end);
-
-            shift.deviation = shift.deviation || {};
+            const plannedRange = this.timeRange(shift.start, shift.end);
+            if (!plannedRange) continue;
+            const plannedStart = plannedRange.start;
+            const plannedEnd = plannedRange.end;
+            const deviation = { ...(shift.deviation || {}) };
+            let actualStart = shift.actualStart || null;
+            let actualEnd = shift.actualEnd || null;
 
             if (kind === 'late') {
                 const actualStartMin = Math.min(plannedStart + delta, plannedEnd);
-                shift.actualStart = this.formatMinutesToTime(actualStartMin);
-                shift.deviation.lateMinutes = actualStartMin - plannedStart;
-                if (reason) shift.deviation.reason = reason;
+                actualStart = this.formatMinutesToTime(actualStartMin);
+                deviation.lateMinutes = actualStartMin - plannedStart;
+                if (reason) deviation.reason = reason;
             }
 
             if (kind === 'early') {
                 const actualEndMin = Math.max(plannedEnd - delta, plannedStart);
-                shift.actualEnd = this.formatMinutesToTime(actualEndMin);
-                shift.deviation.earlyMinutes = plannedEnd - actualEndMin;
-                if (reason) shift.deviation.reason = reason;
+                actualEnd = this.formatMinutesToTime(actualEndMin);
+                deviation.earlyMinutes = plannedEnd - actualEndMin;
+                if (reason) deviation.reason = reason;
             }
 
             await DataManager.reportShiftDeviation(shift.id, {
-                actualStart: shift.actualStart,
-                actualEnd: shift.actualEnd,
-                deviation: shift.deviation
+                actualStart,
+                actualEnd,
+                deviation
             });
             return storeId;
         }
@@ -1712,19 +1879,10 @@ const App = {
 
         try {
             const storeId = await this.applyEmployeeShiftDeviation('late', minutes, reason);
-            const today = new Date();
-            await DataManager.addNotification({
-                target: 'admin',
-                type: 'late',
-                employeeId: this.currentUser.id,
-                employeeName: this.currentUser.name,
-                storeId: storeId || this.employeeStore,
-                weekKey: DateUtils.getWeekKey(today),
-                dayKey: DateUtils.getTodayKey(),
-                date: today.toISOString().split('T')[0],
-                message: `Kommt ${minutes} Minuten später`,
-                reason: reason || null
-            });
+            if (!storeId) {
+                this.showToast('Für heute wurde keine Schicht gefunden.', 'warning');
+                return;
+            }
 
             this.hideModals();
             document.getElementById('late-reason').value = '';
@@ -1749,19 +1907,10 @@ const App = {
 
         try {
             const storeId = await this.applyEmployeeShiftDeviation('early', minutes, reason);
-            const today = new Date();
-            await DataManager.addNotification({
-                target: 'admin',
-                type: 'early',
-                employeeId: this.currentUser.id,
-                employeeName: this.currentUser.name,
-                storeId: storeId || this.employeeStore,
-                weekKey: DateUtils.getWeekKey(today),
-                dayKey: DateUtils.getTodayKey(),
-                date: today.toISOString().split('T')[0],
-                message: `Geht ${minutes} Minuten früher`,
-                reason: reason || null
-            });
+            if (!storeId) {
+                this.showToast('Für heute wurde keine Schicht gefunden.', 'warning');
+                return;
+            }
 
             this.hideModals();
             document.getElementById('early-reason').value = '';
@@ -1847,17 +1996,18 @@ const App = {
                 <div class="time-inputs" id="${dayKey}-times" style="${!existing.available ? 'display:none' : ''}">
                     <div class="time-group">
                         <label>Von:</label>
-                        <input type="time" name="${dayKey}_start" value="${existing.start || '10:00'}" step="60" class="time-input-24h">
+                        <input type="time" name="${dayKey}_start" value="${this.escapeHtml(existing.start || '10:00')}" step="60" class="time-input-24h">
                     </div>
                     <div class="time-group">
                         <label>Bis:</label>
-                        <input type="time" name="${dayKey}_end" value="${existing.end || '20:00'}" step="60" class="time-input-24h">
+                        <input type="time" name="${dayKey}_end" value="${this.escapeHtml(existing.end || '20:00')}" step="60" class="time-input-24h">
                     </div>
                 </div>
                 <div class="day-notes" id="${dayKey}-notes" style="${!existing.available ? 'display:none' : ''}">
                     <input type="text" name="${dayKey}_notes" 
+                        maxlength="500"
                         placeholder="Bemerkung (optional)" 
-                        value="${existing.notes || ''}">
+                        value="${this.escapeHtml(existing.notes || '')}">
                 </div>
             `;
             container.appendChild(card);
@@ -1887,23 +2037,34 @@ const App = {
         const weekKey = DateUtils.getWeekKey(this.currentWeek);
         const form = e.target;
         const days = {};
+        let validationMessage = null;
 
         DateUtils.DAY_KEYS.forEach(dayKey => {
             const available = form[`${dayKey}_available`]?.checked || false;
+            const start = available ? form[`${dayKey}_start`]?.value : null;
+            const end = available ? form[`${dayKey}_end`]?.value : null;
+            if (available && (!start || !end || start === end)) {
+                validationMessage = `${DateUtils.DAYS[DateUtils.DAY_KEYS.indexOf(dayKey)]}: Bitte gültige, unterschiedliche Zeiten eingeben.`;
+            }
             days[dayKey] = {
                 available: available,
-                start: available ? form[`${dayKey}_start`]?.value : null,
-                end: available ? form[`${dayKey}_end`]?.value : null,
-                notes: available ? form[`${dayKey}_notes`]?.value : null
+                start,
+                end,
+                notes: available ? form[`${dayKey}_notes`]?.value.trim().slice(0, 500) : null
             };
         });
+
+        if (validationMessage) {
+            this.showToast(validationMessage, 'error');
+            return;
+        }
 
         const availability = {
             employeeId: this.currentUser.id,
             weekKey: weekKey,
             storeId: this.employeeStore,
             days: days,
-            notes: document.getElementById('general-notes').value,
+            notes: document.getElementById('general-notes').value.trim().slice(0, 2000),
             submittedAt: new Date().toISOString()
         };
 
@@ -1937,7 +2098,7 @@ const App = {
             statusContainer.className = 'schedule-status pending';
             statusContainer.innerHTML = `
                 <h3>Kein Plan vorhanden</h3>
-                <p>${storeName}: Für diese Woche wurde noch kein Schichtplan erstellt.</p>
+                <p>${this.escapeHtml(storeName)}: Für diese Woche wurde noch kein Schichtplan erstellt.</p>
             `;
             contentContainer.innerHTML = '';
             summaryContainer.innerHTML = '';
@@ -1949,13 +2110,13 @@ const App = {
             statusContainer.className = 'schedule-status released';
             statusContainer.innerHTML = `
                 <h3>Plan freigegeben</h3>
-                <p>${storeName} · Freigegeben am ${new Date(schedule.releasedAt).toLocaleDateString('de-DE')}</p>
+                <p>${this.escapeHtml(storeName)} · Freigegeben am ${new Date(schedule.releasedAt).toLocaleDateString('de-DE')}</p>
             `;
         } else {
             statusContainer.className = 'schedule-status pending';
             statusContainer.innerHTML = `
                 <h3>Vorläufiger Plan</h3>
-                <p>${storeName} · Dieser Plan wurde noch nicht freigegeben.</p>
+                <p>${this.escapeHtml(storeName)} · Dieser Plan wurde noch nicht freigegeben.</p>
             `;
         }
 
@@ -1983,10 +2144,10 @@ const App = {
                 let deviationHtml = '';
                 if (myShift.deviation) {
                     if (myShift.deviation.lateMinutes) {
-                        deviationHtml = `<div class="shift-deviation late">${myShift.deviation.lateMinutes} Min. später gekommen</div>`;
+                        deviationHtml = `<div class="shift-deviation late">${this.escapeHtml(myShift.deviation.lateMinutes)} Min. später gekommen</div>`;
                     }
                     if (myShift.deviation.earlyMinutes) {
-                        deviationHtml = `<div class="shift-deviation early">${myShift.deviation.earlyMinutes} Min. früher gegangen</div>`;
+                        deviationHtml = `<div class="shift-deviation early">${this.escapeHtml(myShift.deviation.earlyMinutes)} Min. früher gegangen</div>`;
                     }
                 }
 
@@ -2071,7 +2232,7 @@ const App = {
 
         // Rows for each employee
         employees.forEach(emp => {
-            html += `<tr><td class="name-cell">${emp.name}</td>`;
+            html += `<tr><td class="name-cell">${this.escapeHtml(emp.name)}</td>`;
             
             DateUtils.DAY_KEYS.forEach((dayKey, dayIndex) => {
                 const dayDate = dates[dayIndex];
@@ -2099,7 +2260,7 @@ const App = {
                     
                     html += `<td class="${cellClass}" 
                         onclick="App.openShiftModal('${emp.id}', '${dayKey}', ${dayIndex})"
-                        title="${absence.note || badgeText}">
+                        title="${this.escapeHtml(absence.note || badgeText)}">
                         <span class="absence-cell-badge ${badgeClass}">${badgeText}</span>
                     </td>`;
                 } else if (shift) {
@@ -2119,11 +2280,11 @@ const App = {
                     if (shift.deviation) {
                         if (shift.deviation.lateMinutes) {
                             cellClass += ' has-deviation deviation-late';
-                            deviationHtml = `<span class="deviation-indicator late">+${shift.deviation.lateMinutes}m</span>`;
+                            deviationHtml = `<span class="deviation-indicator late">+${this.escapeHtml(shift.deviation.lateMinutes)}m</span>`;
                         }
                         if (shift.deviation.earlyMinutes) {
                             cellClass += ' has-deviation deviation-early';
-                            deviationHtml = `<span class="deviation-indicator early">-${shift.deviation.earlyMinutes}m</span>`;
+                            deviationHtml = `<span class="deviation-indicator early">-${this.escapeHtml(shift.deviation.earlyMinutes)}m</span>`;
                         }
                     }
                     
@@ -2136,7 +2297,9 @@ const App = {
                 } else {
                     const empAvail = availByEmployeeId.get(emp.id);
                     const dayAvail = empAvail?.days?.[dayKey];
-                    const hint = dayAvail?.available ? `<span class="avail-hint">${dayAvail.start}–${dayAvail.end}</span>` : '';
+                    const hint = dayAvail?.available && this.timeRange(dayAvail.start, dayAvail.end)
+                        ? `<span class="avail-hint">${this.escapeHtml(dayAvail.start)}–${this.escapeHtml(dayAvail.end)}</span>`
+                        : '';
 
                     html += `<td class="shift-cell" 
                         onclick="App.openShiftModal('${emp.id}', '${dayKey}', ${dayIndex})">${hint}</td>`;
@@ -2201,10 +2364,10 @@ const App = {
             
             return `
                 <div class="deviation-item ${type}">
-                    <span class="deviation-name">${d.employeeName}</span>
+                    <span class="deviation-name">${this.escapeHtml(this.getEmployeeName(d.employeeId, d.employeeName))}</span>
                     <span class="deviation-day">${d.dayName}</span>
-                    <span class="deviation-info">${info}</span>
-                    ${d.deviation.reason ? `<span class="deviation-reason">${d.deviation.reason}</span>` : ''}
+                    <span class="deviation-info">${this.escapeHtml(info)}</span>
+                    ${d.deviation.reason ? `<span class="deviation-reason">${this.escapeHtml(d.deviation.reason)}</span>` : ''}
                 </div>
             `;
         }).join('');
@@ -2221,14 +2384,14 @@ const App = {
         this.currentEditCell = { employeeId, dayKey, dayIndex };
 
         // Set day info
-        let dayInfoHtml = `<strong>${employee.name}</strong> – ${DateUtils.DAYS[dayIndex]}, ${DateUtils.formatDate(dates[dayIndex])}`;
+        let dayInfoHtml = `<strong>${this.escapeHtml(employee.name)}</strong> – ${DateUtils.DAYS[dayIndex]}, ${DateUtils.formatDate(dates[dayIndex])}`;
         
         // Check if employee is absent
         const absence = DataManager.getEmployeeAbsenceForDate(employeeId, dayDate);
         if (absence) {
             const typeLabel = absence.type === 'urlaub' ? 'Urlaub' : 
                              absence.type === 'krank' ? 'Krank' : 'Abwesend';
-            dayInfoHtml += `<div class="modal-absence-warning">⚠️ ${employee.name} ist an diesem Tag abwesend (${typeLabel}${absence.note ? ': ' + absence.note : ''})</div>`;
+            dayInfoHtml += `<div class="modal-absence-warning">⚠️ ${this.escapeHtml(employee.name)} ist an diesem Tag abwesend (${typeLabel}${absence.note ? ': ' + this.escapeHtml(absence.note) : ''})</div>`;
         }
         
         document.getElementById('modal-day-info').innerHTML = dayInfoHtml;
@@ -2242,12 +2405,12 @@ const App = {
             // Employee is absent - show warning instead of availability
             const typeLabel = absence.type === 'urlaub' ? 'im Urlaub' : 
                              absence.type === 'krank' ? 'krank' : 'abwesend';
-            availableList.innerHTML = `<div class="no-available" style="color: #b91c1c;">🚫 ${employee.name} ist ${typeLabel}</div>`;
-        } else if (dayAvail?.available) {
+            availableList.innerHTML = `<div class="no-available" style="color: #b91c1c;">🚫 ${this.escapeHtml(employee.name)} ist ${typeLabel}</div>`;
+        } else if (dayAvail?.available && this.timeRange(dayAvail.start, dayAvail.end)) {
             availableList.innerHTML = `
-                <div class="available-employee" onclick="App.quickAssign('${dayAvail.start}', '${dayAvail.end}')">
+                <div class="available-employee" onclick="App.quickAssign('${this.encodeActionData(dayAvail.start)}', '${this.encodeActionData(dayAvail.end)}')">
                     <span class="name">Verfügbar</span>
-                    <span class="time">${dayAvail.start} – ${dayAvail.end}</span>
+                    <span class="time">${this.escapeHtml(dayAvail.start)} – ${this.escapeHtml(dayAvail.end)}</span>
                 </div>
             `;
         } else {
@@ -2278,8 +2441,8 @@ const App = {
     },
 
     async quickAssign(start, end) {
-        document.getElementById('shift-start').value = start;
-        document.getElementById('shift-end').value = end;
+        document.getElementById('shift-start').value = decodeURIComponent(start || '');
+        document.getElementById('shift-end').value = decodeURIComponent(end || '');
         await this.saveShift();
     },
 
@@ -2299,8 +2462,14 @@ const App = {
             return;
         }
 
+        if (!this.timeRange(start, end)) {
+            this.showToast('Start- und Endzeit müssen gültig und unterschiedlich sein.', 'error');
+            return;
+        }
+
         // Get or create schedule
-        let schedule = DataManager.getScheduleForWeek(weekKey, this.adminStore);
+        const existingSchedule = DataManager.getScheduleForWeek(weekKey, this.adminStore);
+        let schedule = this.cloneSchedule(existingSchedule);
         if (!schedule) {
             schedule = {
                 weekKey: weekKey,
@@ -2331,7 +2500,7 @@ const App = {
         // If employee has no availability for this day, create a shift request
         const employeeAvail = DataManager.getEmployeeAvailability(employeeId, weekKey, this.adminStore);
         const dayAvail = employeeAvail?.days?.[dayKey];
-        const needsRequest = !(dayAvail?.available);
+        const needsRequest = !this.isShiftWithinAvailability(start, end, dayAvail);
 
         if (needsRequest) {
             shift.requestStatus = 'pending';
@@ -2376,6 +2545,8 @@ const App = {
         schedule.shifts[dayKey].push(shift);
 
         schedule.storeId = this.adminStore;
+        schedule.released = false;
+        schedule.releasedAt = null;
         try {
             await DataManager.saveSchedule(schedule);
             if (needsRequest) {
@@ -2395,7 +2566,11 @@ const App = {
             this.renderScheduleEditor();
             this.renderWeekDeviations();
             this.updateReleaseButton();
-            this.showToast(needsRequest ? 'Schichtanfrage gesendet!' : 'Schicht eingetragen!', needsRequest ? 'warning' : 'success');
+            const wasReleased = Boolean(existingSchedule?.released);
+            const message = wasReleased
+                ? 'Schicht gespeichert. Der Plan ist wieder ein Entwurf und muss erneut freigegeben werden.'
+                : (needsRequest ? 'Schichtanfrage gesendet!' : 'Schicht eingetragen!');
+            this.showToast(message, needsRequest || wasReleased ? 'warning' : 'success');
         } catch (error) {
             this.showToast(error?.message || 'Schicht konnte nicht gespeichert werden.', 'error');
         }
@@ -2406,11 +2581,14 @@ const App = {
 
         const { employeeId, dayKey } = this.currentEditCell;
         const weekKey = DateUtils.getWeekKey(this.currentWeek);
-        let schedule = DataManager.getScheduleForWeek(weekKey, this.adminStore);
+        const existingSchedule = DataManager.getScheduleForWeek(weekKey, this.adminStore);
+        let schedule = this.cloneSchedule(existingSchedule);
 
         if (schedule?.shifts?.[dayKey]) {
             schedule.shifts[dayKey] = schedule.shifts[dayKey].filter(s => s.employeeId !== employeeId);
             schedule.storeId = this.adminStore;
+            schedule.released = false;
+            schedule.releasedAt = null;
             try {
                 await DataManager.saveSchedule(schedule);
             } catch (error) {
@@ -2422,7 +2600,9 @@ const App = {
         this.hideModals();
         this.renderScheduleEditor();
         this.renderWeekDeviations();
-        this.showToast('Schicht entfernt.', 'success');
+        this.showToast(existingSchedule?.released
+            ? 'Schicht entfernt. Der Plan muss erneut freigegeben werden.'
+            : 'Schicht entfernt.', existingSchedule?.released ? 'warning' : 'success');
     },
 
     async saveSchedule() {
@@ -2446,6 +2626,19 @@ const App = {
 
     async releaseSchedule() {
         const weekKey = DateUtils.getWeekKey(this.currentWeek);
+        const schedule = DataManager.getScheduleForWeek(weekKey, this.adminStore);
+        const validation = this.validateScheduleForRelease(schedule, this.adminStore);
+
+        if (validation.errors.length > 0) {
+            alert(`Plan kann nicht freigegeben werden:\n\n${validation.errors.slice(0, 8).map(error => `• ${error}`).join('\n')}`);
+            return;
+        }
+
+        if (validation.warnings.length > 0) {
+            const proceed = confirm(`Hinweise vor der Freigabe:\n\n${validation.warnings.slice(0, 8).map(warning => `• ${warning}`).join('\n')}\n\nTrotzdem freigeben?`);
+            if (!proceed) return;
+        }
+
         try {
             await DataManager.releaseSchedule(weekKey, this.adminStore);
             this.updateReleaseButton();
@@ -2551,8 +2744,8 @@ const App = {
                          <div class="conflict-item">
                              <div class="conflict-icon">${icon}</div>
                              <div class="conflict-main">
-                                 <div class="conflict-title">${c.employeeName} – ${DateUtils.DAYS_SHORT[c.dayIndex]} (${c.date})</div>
-                                 <div class="conflict-sub">${c.detail}</div>
+                                 <div class="conflict-title">${this.escapeHtml(c.employeeName)} – ${DateUtils.DAYS_SHORT[c.dayIndex]} (${c.date})</div>
+                                 <div class="conflict-sub">${this.escapeHtml(c.detail)}</div>
                              </div>
                              <div class="conflict-tag">${tag}</div>
                          </div>
@@ -2571,6 +2764,7 @@ const App = {
 
          const newShifts = {};
          const skipped = [];
+         const pendingRequests = [];
 
          DateUtils.DAY_KEYS.forEach((dayKey, dayIndex) => {
              const dayDate = dates[dayIndex];
@@ -2579,12 +2773,20 @@ const App = {
 
              dayShifts.forEach(shift => {
                  if (!skipConflicts) {
-                     newShifts[dayKey].push({
+                     const availability = DataManager.getEmployeeAvailability(shift.employeeId, currentWeekKey, this.adminStore)
+                         ?.days?.[dayKey];
+                     const copiedShift = {
                          employeeId: shift.employeeId,
-                         employeeName: shift.employeeName,
+                         employeeName: this.getEmployeeName(shift.employeeId, shift.employeeName),
                          start: shift.start,
                          end: shift.end
-                     });
+                     };
+                     if (!this.isShiftWithinAvailability(shift.start, shift.end, availability)) {
+                         copiedShift.requestStatus = 'pending';
+                         copiedShift.requestedAt = new Date().toISOString();
+                         pendingRequests.push({ ...copiedShift, dayKey });
+                     }
+                     newShifts[dayKey].push(copiedShift);
                      return;
                  }
 
@@ -2596,14 +2798,14 @@ const App = {
 
                  const avail = DataManager.getEmployeeAvailability(shift.employeeId, currentWeekKey, this.adminStore);
                  const dayAvail = avail?.days?.[dayKey];
-                 if (!dayAvail || !dayAvail.available) {
+                 if (!this.isShiftWithinAvailability(shift.start, shift.end, dayAvail)) {
                      skipped.push({ employeeId: shift.employeeId, dayIndex, reason: 'Keine Verfügbarkeit' });
                      return;
                  }
 
                  newShifts[dayKey].push({
                      employeeId: shift.employeeId,
-                     employeeName: shift.employeeName,
+                     employeeName: this.getEmployeeName(shift.employeeId, shift.employeeName),
                      start: shift.start,
                      end: shift.end
                  });
@@ -2624,6 +2826,23 @@ const App = {
          } catch (error) {
              this.showToast(error?.message || 'Schichten konnten nicht kopiert werden.', 'error');
              return;
+         }
+
+         if (pendingRequests.length > 0) {
+             try {
+                 await Promise.all(pendingRequests.map(request => DataManager.addNotification({
+                     target: 'employee',
+                     targetEmployeeId: request.employeeId,
+                     type: 'shift_request',
+                     storeId: this.adminStore,
+                     employeeId: request.employeeId,
+                     employeeName: request.employeeName,
+                     message: `Schichtanfrage: ${request.start}–${request.end}`,
+                     reason: 'Beim Kopieren des Wochenplans erstellt.'
+                 })));
+             } catch (error) {
+                 this.showToast('Plan kopiert, aber nicht alle Hinweise konnten erstellt werden.', 'warning');
+             }
          }
          this.hideModals();
          this.pendingCopyContext = null;
@@ -2683,7 +2902,7 @@ const App = {
 
             return `
                 <tr>
-                    <td class="highlight">${emp.name}</td>
+                    <td class="highlight">${this.escapeHtml(emp.name)}</td>
                     <td>${empStats.plannedHours.toFixed(1)} Std.</td>
                     <td>${empStats.actualHours.toFixed(1)} Std.</td>
                     <td class="${diffClass}">${diffText} Std.</td>
@@ -2709,7 +2928,7 @@ const App = {
                 return `
                     <div class="month-card">
                         <div class="month-card-header">
-                            <div class="name">${emp.name}</div>
+                            <div class="name">${this.escapeHtml(emp.name)}</div>
                             <div class="meta">${hasRate ? `${hourlyRate.toFixed(2).replace('.', ',')} €/h` : 'Kein Stundenlohn'}</div>
                         </div>
                         <div class="month-card-grid">
@@ -2735,6 +2954,9 @@ const App = {
 
         const storeId = this.adminStore || 'fresh_fries';
         const storeName = DataManager.getStoreName(storeId);
+        const archivedEmployees = DataManager.getArchivedEmployees()
+            .filter(employee => (employee.stores || []).includes(storeId))
+            .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'de'));
 
         const storeEmployees = employees
             .filter(e => (e.stores || []).includes(storeId))
@@ -2747,7 +2969,7 @@ const App = {
             const currentAbsence = absences.find(a => {
                 const start = new Date(a.startDate);
                 const end = new Date(a.endDate);
-                return today >= start && today <= end;
+                return a.status === 'approved' && today >= start && today <= end;
             });
 
             let absenceBadge = '';
@@ -2759,18 +2981,29 @@ const App = {
             }
 
             const stores = Array.isArray(emp.stores) && emp.stores.length > 0 ? emp.stores : [emp.primaryStore || emp.store || storeId];
-            const storeChips = stores.map(s => `<span class="store-chip">${DataManager.getStoreName(s)}</span>`).join('');
+            const storeChips = stores.map(s => `<span class="store-chip">${this.escapeHtml(DataManager.getStoreName(s))}</span>`).join('');
+            const accountStatus = emp.profileId
+                ? '<span class="absence-pill approved">Zugang angelegt</span>'
+                : '<span class="absence-pill pending">Nicht eingeladen</span>';
+            const accountDetail = emp.email
+                ? `<div class="employee-type">${this.escapeHtml(emp.email)}</div>`
+                : '';
+            const inviteButton = emp.profileId
+                ? '<button class="btn btn-secondary btn-small" disabled>Eingeladen</button>'
+                : `<button class="btn btn-primary btn-small" onclick="App.openInviteEmployee('${emp.id}', '${this.encodeActionData(emp.name)}')"><span class="btn-icon-inline">✉️</span> Einladen</button>`;
 
             return `
                 <div class="employee-card ${currentAbsence ? 'employee-absent' : ''}">
                     <div class="employee-info">
                         <div class="employee-name-row">
-                            <span class="employee-name">${emp.name}</span>
+                            <span class="employee-name">${this.escapeHtml(emp.name)}</span>
                             ${absenceBadge}
+                            ${accountStatus}
                         </div>
                         <div class="employee-meta">
                             <div class="employee-stores">${storeChips}</div>
                             <div class="employee-type">${emp.type === 'aushilfe' ? 'Aushilfe' : 'Festangestellt'}</div>
+                            ${accountDetail}
                         </div>
                     </div>
                     <div class="employee-actions">
@@ -2781,23 +3014,44 @@ const App = {
                             <span class="btn-icon-inline">⏱️</span> Standard
                         </button>
                         <button class="btn btn-secondary btn-small" onclick="App.openEditEmployeeModal('${emp.id}')">✎</button>
-                        <button class="btn btn-primary btn-small" onclick="App.openInviteEmployee('${emp.id}', '${encodeURIComponent(emp.name)}')">
-                            <span class="btn-icon-inline">✉️</span> Einladen
-                        </button>
-                        <button class="btn btn-danger btn-small btn-icon-only" onclick="App.deleteEmployee('${emp.id}')">✕</button>
+                        ${inviteButton}
+                        <button class="btn btn-danger btn-small" onclick="App.deleteEmployee('${emp.id}')">Archivieren</button>
                     </div>
                 </div>
             `;
         }).join('');
 
+        const archivedCards = archivedEmployees.map(employee => `
+            <div class="employee-card">
+                <div class="employee-info">
+                    <div class="employee-name-row">
+                        <span class="employee-name">${this.escapeHtml(employee.name)}</span>
+                        <span class="absence-pill pending">Archiviert</span>
+                    </div>
+                </div>
+                <div class="employee-actions">
+                    <button class="btn btn-secondary btn-small" onclick="App.restoreEmployee('${employee.id}')">Wiederherstellen</button>
+                </div>
+            </div>
+        `).join('');
+
         container.innerHTML = `
             <div class="employees-store-section">
                 <div class="store-section-header">
-                    <h4>${storeName}</h4>
+                    <h4>${this.escapeHtml(storeName)}</h4>
                     <span class="store-count">${storeEmployees.length}</span>
                 </div>
                 ${cards || '<div class="empty-state">Keine Mitarbeiter</div>'}
             </div>
+            ${archivedCards ? `
+                <div class="employees-store-section">
+                    <div class="store-section-header">
+                        <h4>Archivierte Mitarbeiter</h4>
+                        <span class="store-count">${archivedEmployees.length}</span>
+                    </div>
+                    ${archivedCards}
+                </div>
+            ` : ''}
         `;
 
         // Render absences overview
@@ -2837,7 +3091,7 @@ const App = {
             const typeLabel = absence.type === 'urlaub' ? 'Urlaub' : 
                              absence.type === 'krank' ? 'Krank' : 'Abwesend';
             
-            const dateText = startDate.toISOString().split('T')[0] === endDate.toISOString().split('T')[0]
+            const dateText = absence.startDate === absence.endDate
                 ? DateUtils.formatDate(startDate)
                 : `${DateUtils.formatDate(startDate)} – ${DateUtils.formatDate(endDate)}`;
             
@@ -2850,10 +3104,10 @@ const App = {
                 <div class="absence-item ${isActive ? 'absence-active' : ''}" onclick="App.editAbsence('${absence.id}')">
                     <span class="absence-icon">${typeIcon}</span>
                     <div class="absence-info">
-                        <div class="absence-name">${employee?.name || 'Unbekannt'} ${statusPill}</div>
+                        <div class="absence-name">${this.escapeHtml(employee?.name || 'Unbekannt')} ${statusPill}</div>
                         <div class="absence-dates">${typeLabel}: ${dateText}</div>
-                        ${absence.note ? `<div class="absence-note">${absence.note}</div>` : ''}
-                        ${absence.responseReason ? `<div class="absence-note">Grund: ${absence.responseReason}</div>` : ''}
+                        ${absence.note ? `<div class="absence-note">${this.escapeHtml(absence.note)}</div>` : ''}
+                        ${absence.responseReason ? `<div class="absence-note">Grund: ${this.escapeHtml(absence.responseReason)}</div>` : ''}
                     </div>
                     ${isActive ? '<span class="absence-status">Aktuell</span>' : ''}
                 </div>
@@ -2906,10 +3160,10 @@ const App = {
         const employee = DataManager.getEmployee(employeeId);
         if (!employee) return;
         
-        document.getElementById('absence-employee-info').innerHTML = `<strong>${employee.name}</strong>`;
+        document.getElementById('absence-employee-info').innerHTML = `<strong>${this.escapeHtml(employee.name)}</strong>`;
         
         // Set default dates
-        const today = new Date().toISOString().split('T')[0];
+        const today = DateUtils.formatDateKey(new Date());
         document.getElementById('absence-start').value = today;
         document.getElementById('absence-end').value = today;
         document.getElementById('absence-type').value = 'urlaub';
@@ -2926,7 +3180,7 @@ const App = {
         if (!absence) return;
         
         const employee = DataManager.getEmployee(absence.employeeId);
-        document.getElementById('absence-employee-info').innerHTML = `<strong>${employee?.name || 'Unbekannt'}</strong>`;
+        document.getElementById('absence-employee-info').innerHTML = `<strong>${this.escapeHtml(employee?.name || 'Unbekannt')}</strong>`;
         
         document.getElementById('absence-start').value = absence.startDate;
         document.getElementById('absence-end').value = absence.endDate;
@@ -3052,14 +3306,14 @@ const App = {
         if (stores.length <= 1) {
             group.style.display = 'none';
             select.innerHTML = stores.length === 1
-                ? `<option value="${stores[0]}">${DataManager.getStoreName(stores[0])}</option>`
+                ? `<option value="${this.escapeHtml(stores[0])}">${this.escapeHtml(DataManager.getStoreName(stores[0]))}</option>`
                 : '';
             select.value = stores[0] || 'fresh_fries';
             return;
         }
 
         group.style.display = 'block';
-        select.innerHTML = stores.map(id => `<option value="${id}">${DataManager.getStoreName(id)}</option>`).join('');
+        select.innerHTML = stores.map(id => `<option value="${this.escapeHtml(id)}">${this.escapeHtml(DataManager.getStoreName(id))}</option>`).join('');
 
         const wanted = preferPrimary || this.adminStore;
         if (stores.includes(wanted)) {
@@ -3102,7 +3356,9 @@ const App = {
 
         const existing = DataManager.getEmployeeByName(name);
         if (existing && existing.id !== id) {
-            this.showToast('Name existiert bereits.', 'error');
+            this.showToast(existing.active === false
+                ? 'Dieser Name ist archiviert. Stelle den Mitarbeiter zuerst wieder her.'
+                : 'Name existiert bereits.', 'error');
             return;
         }
 
@@ -3140,15 +3396,29 @@ const App = {
         const emp = DataManager.getEmployee(id);
         if (!emp) return;
 
-        if (confirm(`${emp.name} wirklich löschen?`)) {
+        if (confirm(`${emp.name} archivieren? Historische Pläne und Zeiten bleiben erhalten.`)) {
             try {
                 await DataManager.deleteEmployee(id);
                 this.renderEmployeesTab();
                 this.renderAdminView();
-                this.showToast(`${emp.name} gelöscht.`, 'success');
+                this.showToast(`${emp.name} archiviert.`, 'success');
             } catch (error) {
-                this.showToast(error?.message || 'Mitarbeiter konnte nicht gelöscht werden.', 'error');
+                this.showToast(error?.message || 'Mitarbeiter konnte nicht archiviert werden.', 'error');
             }
+        }
+    },
+
+    async restoreEmployee(id) {
+        const employee = DataManager.getEmployee(id);
+        if (!employee) return;
+
+        try {
+            await DataManager.restoreEmployee(id);
+            this.renderEmployeesTab();
+            this.renderAdminView();
+            this.showToast(`${employee.name} wiederhergestellt.`, 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'Mitarbeiter konnte nicht wiederhergestellt werden.', 'error');
         }
     },
 

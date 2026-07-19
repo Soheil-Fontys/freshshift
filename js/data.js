@@ -286,15 +286,15 @@ const DataManager = {
     },
 
     getAbsencesForDate(date) {
-        const dateStr = date.toISOString().split('T')[0]; // YYYY-MM-DD
+        const dateStr = DateUtils.formatDateKey(date);
         return this.getAbsences().filter(a => {
             return dateStr >= a.startDate && dateStr <= a.endDate;
         });
     },
 
     getAbsencesForDateRange(startDate, endDate) {
-        const start = startDate.toISOString().split('T')[0];
-        const end = endDate.toISOString().split('T')[0];
+        const start = DateUtils.formatDateKey(startDate);
+        const end = DateUtils.formatDateKey(endDate);
         return this.getAbsences().filter(a => {
             // Check if absence overlaps with the range
             return a.startDate <= end && a.endDate >= start;
@@ -302,7 +302,7 @@ const DataManager = {
     },
 
     isEmployeeAbsent(employeeId, date) {
-        const dateStr = date.toISOString().split('T')[0];
+        const dateStr = DateUtils.formatDateKey(date);
         return this.getAbsences().some(a => 
             a.employeeId === employeeId &&
             (a.status || 'approved') === 'approved' &&
@@ -312,7 +312,7 @@ const DataManager = {
     },
  
     getEmployeeAbsenceForDate(employeeId, date) {
-        const dateStr = date.toISOString().split('T')[0];
+        const dateStr = DateUtils.formatDateKey(date);
         return this.getAbsences().find(a => 
             a.employeeId === employeeId &&
             (a.status || 'approved') === 'approved' &&
@@ -399,7 +399,7 @@ const DataManager = {
         const store = this.normalizeStoreId(storeId);
         const year = date.getFullYear();
         const month = date.getMonth();
-        const employees = this.getEmployees();
+        const employees = this.getEmployees({ includeInactive: true });
         const schedules = this.getSchedules().filter(s => this.normalizeStoreId(s.storeId) === store);
 
         
@@ -622,9 +622,17 @@ const DateUtils = {
         return hours * 60 + minutes;
     },
 
+    formatDateKey(date) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    },
+
     calculateDuration(start, end) {
         const startMinutes = this.parseTimeToMinutes(start);
-        const endMinutes = this.parseTimeToMinutes(end);
+        let endMinutes = this.parseTimeToMinutes(end);
+        if (endMinutes < startMinutes) endMinutes += 24 * 60;
         return (endMinutes - startMinutes) / 60;
     },
 

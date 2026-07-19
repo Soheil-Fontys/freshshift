@@ -488,6 +488,16 @@ body {
     font-size: 0.75rem;
 }
 
+.availability-note {
+    display: block;
+    margin-top: 0.2rem;
+    color: var(--gray-600);
+    font-size: 0.68rem;
+    font-weight: 400;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+}
+
 .overview-table .unavailable-cell {
     background: var(--gray-50);
     color: var(--gray-300);
@@ -2589,6 +2599,16 @@ body {
     text-align: right;
 }
 
+.availability-general-note {
+    margin: calc(var(--space-sm) * -0.5) 0 var(--space-md);
+    padding: 0.45rem 0.6rem;
+    border-radius: var(--radius-md);
+    background: var(--gray-50);
+    color: var(--gray-600);
+    font-size: 0.75rem;
+    overflow-wrap: anywhere;
+}
+
 .availability-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
@@ -2603,6 +2623,7 @@ body {
     padding: 0.5rem 0.6rem;
     border-radius: var(--radius-md);
     border: 1px solid var(--gray-200);
+    flex-wrap: wrap;
 }
 
 .avail-pill .d {
@@ -2614,6 +2635,13 @@ body {
 .avail-pill .t {
     font-size: 0.75rem;
     color: var(--gray-700);
+}
+
+.avail-pill .n {
+    flex-basis: 100%;
+    font-size: 0.68rem;
+    color: var(--gray-600);
+    overflow-wrap: anywhere;
 }
 
 .avail-pill.available {
@@ -3311,5 +3339,3 @@ body {
 .week-status-card {
     border-top: 4px solid var(--fresh-fries-color);
 }
-
-
