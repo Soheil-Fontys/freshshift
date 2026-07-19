@@ -94,6 +94,7 @@ test('cloud adapter maps RLS-filtered relational data into the existing UI model
     const userId = '11111111-1111-4111-8111-111111111111';
     const employeeId = '22222222-2222-4222-8222-222222222222';
     const scheduleId = '33333333-3333-4333-8333-333333333333';
+    const respondedDraftScheduleId = '66666666-6666-4666-8666-666666666666';
     const rows = {
         profiles: { id: userId, role: 'employee', display_name: 'Test', email: 'test@example.com' },
         stores: [{ id: 'fresh_fries', name: 'Fresh Fries' }],
@@ -130,6 +131,13 @@ test('cloud adapter maps RLS-filtered relational data into the existing UI model
             released: true,
             released_at: '2026-07-20T10:00:00Z',
             saved_at: '2026-07-19T10:00:00Z'
+        }, {
+            id: respondedDraftScheduleId,
+            store_id: 'fresh_fries',
+            week_key: '2026-W31',
+            released: false,
+            released_at: null,
+            saved_at: '2026-07-20T10:00:00Z'
         }],
         schedule_shifts: [{
             id: '44444444-4444-4444-8444-444444444444',
@@ -146,6 +154,22 @@ test('cloud adapter maps RLS-filtered relational data into the existing UI model
             request_status: 'none',
             requested_at: null,
             responded_at: null,
+            response_reason: null
+        }, {
+            id: '77777777-7777-4777-8777-777777777777',
+            schedule_id: respondedDraftScheduleId,
+            store_id: 'fresh_fries',
+            week_key: '2026-W31',
+            day_key: 'tuesday',
+            employee_id: employeeId,
+            start: '12:00',
+            end: '18:00',
+            actual_start: null,
+            actual_end: null,
+            deviation_json: null,
+            request_status: 'accepted',
+            requested_at: '2026-07-20T09:00:00Z',
+            responded_at: '2026-07-20T09:05:00Z',
             response_reason: null
         }],
         absences: [],
@@ -187,6 +211,7 @@ test('cloud adapter maps RLS-filtered relational data into the existing UI model
     assert.equal(vm.runInContext('DataManager.getEmployee("55555555-5555-4555-8555-555555555555").active', context), false);
     assert.equal(vm.runInContext("DataManager.getScheduleForWeek('2026-W30', 'fresh_fries').shifts.monday[0].start", context), '10:00');
     assert.equal(vm.runInContext("DataManager.getScheduleForWeek('2026-W30', 'fresh_fries').shifts.monday[0].employeeName", context), 'Test Employee');
+    assert.equal(vm.runInContext("DataManager.getScheduleForWeek('2026-W31', 'fresh_fries').shifts.tuesday[0].requestStatus", context), 'accepted');
 });
 
 test('HTML rendering helpers escape stored user content and action data', () => {
@@ -261,6 +286,10 @@ test('production hardening preserves history and separates save from release', (
         path.join(root, 'supabase/functions/invite-employee/index.ts'),
         'utf8'
     );
+    const shiftResponseMigration = fs.readFileSync(
+        path.join(root, 'supabase/migrations/20260719231926_allow_employee_shift_request_responses.sql'),
+        'utf8'
+    );
 
     assert.match(migration, /create or replace function public\.archive_employee/);
     assert.match(migration, /create or replace function public\.restore_employee/);
@@ -268,4 +297,5 @@ test('production hardening preserves history and separates save from release', (
     assert.match(migration, /set released = false,/);
     assert.match(edgeFunction, /invite-employee email rollback failed/);
     assert.match(edgeFunction, /\.eq\("active", true\)/);
+    assert.match(shiftResponseMigration, /request_status in \('pending', 'accepted', 'declined'\)/);
 });
