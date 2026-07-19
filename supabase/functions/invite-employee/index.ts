@@ -131,11 +131,26 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: "Invalid email" }, 400, corsHeaders);
     }
 
-    // Update employee email by id
+    const { data: employee, error: employeeErr } = await adminClient
+      .from("employees")
+      .select("id,name,email,active")
+      .eq("id", employeeId)
+      .eq("active", true)
+      .maybeSingle();
+
+    if (employeeErr || !employee) {
+      return jsonResponse({ error: "Active employee not found" }, 404, corsHeaders);
+    }
+
+    const previousEmail = employee.email;
+
+    // The email must exist before Auth creates the user so the database trigger
+    // can link both records. If Auth rejects the invite, restore the old value.
     const { data: updated, error: updErr } = await adminClient
       .from("employees")
       .update({ email })
       .eq("id", employeeId)
+      .eq("active", true)
       .select("id,name,email")
       .limit(1);
 
@@ -152,10 +167,19 @@ Deno.serve(async (req) => {
 
     const { data: inviteData, error: inviteErr } = await adminClient.auth.admin.inviteUserByEmail(email, {
       redirectTo,
-      data: { display_name: employeeName || updated[0]?.name },
+      data: { display_name: employee.name || employeeName },
     });
 
     if (inviteErr) {
+      const { error: rollbackErr } = await adminClient
+        .from("employees")
+        .update({ email: previousEmail })
+        .eq("id", employeeId)
+        .eq("email", email);
+
+      if (rollbackErr) {
+        console.error("invite-employee email rollback failed", rollbackErr);
+      }
       return jsonResponse({ error: inviteErr.message }, 400, corsHeaders);
     }
 
@@ -164,7 +188,7 @@ Deno.serve(async (req) => {
         ok: true,
         invited: inviteData?.user?.email,
         employee: updated[0],
-        employeeName: employeeName || updated[0]?.name,
+        employeeName: employee.name,
       },
       200,
       corsHeaders,

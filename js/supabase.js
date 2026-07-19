@@ -82,7 +82,19 @@
 
     async function invoke(functionName, body) {
         const { data, error } = await ensureClient().functions.invoke(functionName, { body });
-        if (error) throw error;
+        if (error) {
+            let message = error.message || 'Serverfunktion fehlgeschlagen.';
+            try {
+                const response = error.context;
+                if (response?.clone) {
+                    const payload = await response.clone().json();
+                    if (payload?.error) message = payload.error;
+                }
+            } catch {
+                // Keep the SDK error when the response body is unavailable.
+            }
+            throw new Error(message);
+        }
         return data;
     }
 

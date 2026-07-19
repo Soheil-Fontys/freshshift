@@ -3,7 +3,7 @@
  * Enables offline functionality and caching
  */
 
-const CACHE_NAME = 'freshshift-v8';
+const CACHE_NAME = 'freshshift-v9';
 const STATIC_ASSETS = [
     './',
     './index.html',
@@ -79,6 +79,23 @@ self.addEventListener('fetch', (event) => {
     if (!event.request.url.startsWith(self.location.origin)) {
         return;
     }
+
+    // Navigation must prefer the network so a newly deployed production build
+    // is visible immediately. The cached shell remains the offline fallback.
+    if (event.request.mode === 'navigate') {
+        event.respondWith(
+            fetch(event.request)
+                .then((networkResponse) => {
+                    if (networkResponse?.status === 200) {
+                        const responseToCache = networkResponse.clone();
+                        caches.open(CACHE_NAME).then(cache => cache.put('./index.html', responseToCache));
+                    }
+                    return networkResponse;
+                })
+                .catch(() => caches.match('./index.html'))
+        );
+        return;
+    }
     
     event.respondWith(
         caches.match(event.request)
@@ -109,7 +126,7 @@ self.addEventListener('fetch', (event) => {
                     })
                     .catch(() => {
                         // Network failed, return offline fallback for HTML
-                        if (event.request.headers.get('accept').includes('text/html')) {
+                        if (event.request.headers.get('accept')?.includes('text/html')) {
                             return caches.match('./index.html');
                         }
                     });
