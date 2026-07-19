@@ -79,102 +79,34 @@
           </div>
 
           <div class="login-form">
-            <!-- Login Type Toggle -->
-            <div class="login-toggle">
-              <button class="login-toggle-btn active" data-type="employee">
-                Mitarbeiter
-              </button>
-              <button class="login-toggle-btn" data-type="admin">Admin</button>
-            </div>
-
-            <!-- Employee Login -->
-            <div id="employee-login" class="login-section active">
-              <div class="login-icon">👤</div>
-              <p class="login-hint">
-                Wähle deinen Namen um deine Verfügbarkeit einzutragen oder
-                deinen Schichtplan zu sehen.
-              </p>
-
-              <div class="form-group">
-                <label for="employee-select">Wer bist du?</label>
-                <select id="employee-select">
-                  <option value="">-- Name auswählen --</option>
-                </select>
-              </div>
-
-              <button id="login-btn" class="btn btn-primary btn-large btn-full">
-                Anmelden
-              </button>
-            </div>
-
-            <!-- Admin Login -->
-            <div id="admin-login" class="login-section">
-              <div class="login-icon">🔐</div>
-              <p class="login-hint">
-                Zugang für Geschäftsleitung zur Schichtplanung und
-                Mitarbeiterverwaltung.
-              </p>
-
-              <div class="form-group">
-                <label for="admin-password">Passwort</label>
-                <input
-                  type="password"
-                  id="admin-password"
-                  placeholder="Passwort eingeben"
-                />
-              </div>
-
-              <button
-                id="admin-login-btn"
-                class="btn btn-primary btn-large btn-full"
-              >
-                Admin-Zugang
-              </button>
-              <p id="admin-error" class="login-error"></p>
-            </div>
-          </div>
-
-          <!-- Supabase (Magic Link) - Setup Test -->
-          <div class="cloud-login-panel">
-            <div class="cloud-login-header">
-              <h3>Cloud Login (Beta)</h3>
-              <span class="cloud-login-badge">Supabase</span>
-            </div>
-            <p class="helper-text">
-              Zum Testen der Einrichtung: Email eingeben → Magic Link öffnen →
-              hier sollte „Verbunden“ stehen.
+            <div class="login-icon">🔐</div>
+            <p class="login-hint">
+              Melde dich mit deiner eingeladenen Email-Adresse an. Du erhältst
+              einen sicheren Anmeldelink ohne Passwort.
             </p>
 
-            <div
-              id="cloud-login-connected"
-              class="cloud-login-connected"
-              style="display: none"
-            ></div>
-
-            <div id="cloud-login-form" class="cloud-login-form">
-              <div class="form-group">
-                <label for="cloud-email">Email</label>
-                <input
-                  type="email"
-                  id="cloud-email"
-                  placeholder="name@firma.de"
-                  autocomplete="email"
-                />
-              </div>
-              <div class="form-actions">
-                <button id="cloud-send-link" class="btn btn-primary btn-full">
-                  Magic Link senden
-                </button>
-                <button
-                  id="cloud-signout"
-                  class="btn btn-secondary btn-full"
-                  style="display: none"
-                >
-                  Abmelden (Cloud)
-                </button>
-              </div>
-              <p id="cloud-login-status" class="login-hint"></p>
+            <div class="form-group">
+              <label for="auth-email">Email</label>
+              <input
+                type="email"
+                id="auth-email"
+                placeholder="name@firma.de"
+                autocomplete="email"
+              />
             </div>
+
+            <button type="button" id="auth-send-link" class="btn btn-primary btn-large btn-full">
+              Anmeldelink senden
+            </button>
+            <button
+              type="button"
+              id="auth-signout"
+              class="btn btn-secondary btn-large btn-full"
+              style="display: none"
+            >
+              Abmelden
+            </button>
+            <p id="auth-status" class="login-hint" aria-live="polite"></p>
           </div>
 
           <p class="login-footer">Fresh Fries Schichtplaner</p>
@@ -830,23 +762,15 @@
               </button>
             </div>
 
-            <div class="dashboard-card warning-card">
+            <div class="dashboard-card">
               <div class="card-header">
-                <h3>Backup importieren</h3>
+                <h3>Cloud-Sicherung</h3>
               </div>
               <p class="helper-text">
-                Achtung: Import überschreibt die aktuellen Daten auf diesem
-                Gerät.
+                Die aktiven Daten werden zentral in Supabase gespeichert.
+                Browser-Importe sind deaktiviert, damit Produktionsdaten nicht
+                versehentlich überschrieben werden.
               </p>
-              <div class="form-group">
-                <label for="import-file">JSON-Datei auswählen</label>
-                <input id="import-file" type="file" accept="application/json" />
-              </div>
-              <div class="form-actions">
-                <button id="import-data" class="btn btn-warning">
-                  Importieren
-                </button>
-              </div>
             </div>
           </div>
         </div>
@@ -1177,6 +1101,7 @@
     <script src="js/supabase.js"></script>
 
     <script src="js/data.js"></script>
+    <script src="js/cloud-data.js"></script>
     <script src="js/app.js"></script>
 
     <!-- Service Worker Registration -->

@@ -26,68 +26,6 @@ const DataManager = {
         return storeId || 'fresh_fries';
     },
 
-    // Initialize / migrate data
-    init() {
-        this.migrateEmployees();
-        this.seedDefaultEmployees();
-        this.migrateAvailabilities();
-        this.migrateSchedules();
-        this.migrateAbsences();
-    },
-
-    seedDefaultEmployees() {
-        const existing = this.getEmployees();
-        const byName = new Map(existing.map(e => [String(e.name || '').toLowerCase(), e]));
-
-        const defaults = [
-            // Fresh Fries
-            { name: 'Zhulia', type: 'festangestellt', primaryStore: 'fresh_fries', stores: ['fresh_fries', 'yes_fresh'] },
-            { name: 'Maria', type: 'festangestellt', primaryStore: 'fresh_fries', stores: ['fresh_fries'] },
-            { name: 'Marzena', type: 'festangestellt', primaryStore: 'fresh_fries', stores: ['fresh_fries'] },
-            { name: 'Vito', type: 'aushilfe', primaryStore: 'fresh_fries', stores: ['fresh_fries', 'yes_fresh'] },
-            { name: 'Soheil', type: 'aushilfe', primaryStore: 'fresh_fries', stores: ['fresh_fries'] },
-
-            // Yes Fresh
-            { name: 'Leo', type: 'festangestellt', primaryStore: 'yes_fresh', stores: ['yes_fresh'] },
-            { name: 'Anna', type: 'festangestellt', primaryStore: 'yes_fresh', stores: ['yes_fresh'] },
-            { name: 'Kathi', type: 'festangestellt', primaryStore: 'yes_fresh', stores: ['yes_fresh'] },
-            { name: 'Albo', type: 'festangestellt', primaryStore: 'yes_fresh', stores: ['yes_fresh'] },
-            { name: 'Ouijdane', type: 'festangestellt', primaryStore: 'yes_fresh', stores: ['yes_fresh'] },
-            { name: 'Khanom', type: 'festangestellt', primaryStore: 'yes_fresh', stores: ['yes_fresh'] },
-            { name: 'Rayna', type: 'festangestellt', primaryStore: 'yes_fresh', stores: ['yes_fresh'] },
-            { name: 'Phyllis', type: 'festangestellt', primaryStore: 'yes_fresh', stores: ['yes_fresh'] }
-        ];
-
-        let changed = false;
-        defaults.forEach(d => {
-            const existingEmp = byName.get(d.name.toLowerCase());
-            if (!existingEmp) {
-                existing.push({
-                    id: Date.now().toString() + Math.random().toString(16).slice(2),
-                    name: d.name,
-                    type: d.type,
-                    primaryStore: d.primaryStore,
-                    stores: d.stores
-                });
-                changed = true;
-            } else {
-                // Ensure store metadata exists
-                if (!existingEmp.stores || !Array.isArray(existingEmp.stores) || existingEmp.stores.length === 0) {
-                    existingEmp.stores = [existingEmp.primaryStore || existingEmp.store || 'fresh_fries'];
-                    changed = true;
-                }
-                if (!existingEmp.primaryStore) {
-                    existingEmp.primaryStore = existingEmp.store || existingEmp.stores[0] || 'fresh_fries';
-                    changed = true;
-                }
-            }
-        });
-
-        if (changed) {
-            localStorage.setItem(this.KEYS.EMPLOYEES, JSON.stringify(existing));
-        }
-    },
-
     migrateEmployees() {
         const employees = this.getEmployees();
         if (!employees.length) return;
@@ -306,10 +244,11 @@ const DataManager = {
     },
 
     getDateFromWeek(year, week) {
-        const jan1 = new Date(year, 0, 1);
-        const days = (week - 1) * 7;
-        jan1.setDate(jan1.getDate() + days);
-        return jan1;
+        const januaryFourth = new Date(Date.UTC(year, 0, 4));
+        const day = januaryFourth.getUTCDay() || 7;
+        const monday = new Date(januaryFourth);
+        monday.setUTCDate(januaryFourth.getUTCDate() - day + 1 + ((week - 1) * 7));
+        return new Date(monday.getUTCFullYear(), monday.getUTCMonth(), monday.getUTCDate());
     },
 
     // ===========================
@@ -626,17 +565,23 @@ const DateUtils = {
     DAY_KEYS: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'],
     MONTHS: ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'],
 
-    getWeekNumber(date) {
+    getWeekInfo(date) {
         const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
         const dayNum = d.getUTCDay() || 7;
         d.setUTCDate(d.getUTCDate() + 4 - dayNum);
         const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-        return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+        return {
+            year: d.getUTCFullYear(),
+            week: Math.ceil((((d - yearStart) / 86400000) + 1) / 7)
+        };
+    },
+
+    getWeekNumber(date) {
+        return this.getWeekInfo(date).week;
     },
 
     getWeekKey(date) {
-        const week = this.getWeekNumber(date);
-        const year = date.getFullYear();
+        const { year, week } = this.getWeekInfo(date);
         return `${year}-W${week.toString().padStart(2, '0')}`;
     },
 
@@ -703,5 +648,4 @@ const DateUtils = {
     }
 };
 
-// Initialize
-DataManager.init();
+// Cloud-backed methods are installed by cloud-data.js before the app starts.

@@ -8,14 +8,15 @@ Shift planning for Yes Fresh and Fresh Fries. Employees submit their weekly avai
 - **Manual Schedule Planning**: Admins can prepare and release weekly schedules
 - **Admin Dashboard**: Review submitted availability, absences, requests, and schedules
 - **Personal Schedule View**: Each employee can view their assigned shifts after release
+- **Passwordless Login**: Invited employees and admins authenticate with Supabase Magic Links
 - **Responsive Design**: Works on desktop and mobile devices
 
 ## Quick Start
 
 1. Start a static web server, for example `python3 -m http.server 3000`
 2. Open `http://localhost:3000`
-3. Select an existing employee and enter availability for the week
-4. Admins can access the management view via "Admin-Bereich"
+3. Enter the email address of an invited FreshShift account
+4. Open the Magic Link and use the role-specific employee or admin view
 
 ## Project Structure
 
@@ -25,24 +26,24 @@ freshshift/
 ├── css/
 │   └── styles.css      # All styles (responsive)
 ├── js/
-│   ├── data.js         # Data management (LocalStorage)
-│   ├── supabase.js     # Supabase Auth client
+│   ├── data.js         # Data selectors and date utilities
+│   ├── cloud-data.js   # RLS-backed Supabase data adapter
+│   ├── supabase.js     # Passwordless Auth client
 │   └── app.js          # Main application logic
 ├── supabase/
 │   ├── functions/      # Authenticated server-side functions
 │   └── migrations/     # Versioned production database schema and seed data
+├── tests/              # Dependency-free Node smoke tests
 └── README.md
 ```
 
 ## Data Storage
 
-The current UI still stores planning changes in the browser's LocalStorage while the Supabase data adapter is being integrated:
+Operational data is stored in Supabase. After authentication, the browser loads only the rows permitted by Row Level Security into an in-memory cache. LocalStorage is used only for harmless UI preferences such as the last selected store.
 
-- `freshshift_employees` - Employee list
-- `freshshift_availabilities` - Weekly availability submissions
-- `freshshift_schedules` - Generated and released schedules
+Employee invitations run through the authenticated `invite-employee` Edge Function. Production employee records are restored separately and are deliberately excluded from Git history. Never expose a service-role key in browser code.
 
-The production Supabase foundation contains the recovered stores, employees, and store assignments. Its public tables use Row Level Security, and employee invitations run through the authenticated `invite-employee` Edge Function. Never expose a service-role key in browser code.
+Before deploying a new domain, add its URL to the Supabase Auth Site URL and Redirect URLs. Uninvited email addresses cannot create accounts from the login screen.
 
 ## Business Rules
 
@@ -53,6 +54,6 @@ The production Supabase foundation contains the recovered stores, employees, and
 
 ## Next Milestone
 
-- Replace LocalStorage reads and writes with the Supabase data adapter
-- Require Supabase Auth for employee and admin access
-- Add scheduling-rule validation and automated tests
+- Bootstrap the first admin and invite employee accounts
+- Add scheduling-rule validation and broader browser integration tests
+- Harden remaining dynamic HTML rendering before production rollout
