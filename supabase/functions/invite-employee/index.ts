@@ -6,22 +6,64 @@
 // - SUPABASE_ANON_KEY
 // - SUPABASE_SERVICE_ROLE_KEY
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2.110.7";
+import { corsHeaders as sdkCorsHeaders } from "npm:@supabase/supabase-js@2.110.7/cors";
+
+const allowedOrigins = new Set([
+  "https://freshshift.de",
+  "https://www.freshshift.de",
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+]);
+
+function getCorsHeaders(req: Request): Record<string, string> | null {
+  const origin = req.headers.get("Origin");
+  if (!origin) return {};
+  if (!allowedOrigins.has(origin)) return null;
+
+  return {
+    ...sdkCorsHeaders,
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    Vary: "Origin",
+  };
+}
+
+function jsonResponse(
+  body: Record<string, unknown>,
+  status: number,
+  corsHeaders: Record<string, string>,
+) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json", ...corsHeaders },
+  });
+}
+
+function getRedirectTo(value: unknown): string {
+  if (!value) return "https://freshshift.de/";
+
+  const redirectTo = new URL(String(value));
+  if (!allowedOrigins.has(redirectTo.origin)) {
+    throw new Error("Invalid redirect URL");
+  }
+
+  return redirectTo.toString();
+}
 
 Deno.serve(async (req) => {
-  try {
-    const corsHeaders = {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-      "Access-Control-Allow-Methods": "POST, OPTIONS",
-    };
+  const corsHeaders = getCorsHeaders(req);
+  if (!corsHeaders) {
+    return jsonResponse({ error: "Origin not allowed" }, 403, {});
+  }
 
+  try {
     if (req.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: corsHeaders });
     }
 
     if (req.method !== "POST") {
-      return new Response("Method Not Allowed", { status: 405, headers: corsHeaders });
+      return jsonResponse({ error: "Method not allowed" }, 405, corsHeaders);
     }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
@@ -29,13 +71,13 @@ Deno.serve(async (req) => {
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
     if (!supabaseUrl || !anonKey || !serviceRoleKey) {
-      return new Response(JSON.stringify({ error: "Missing Supabase env vars" }), {
-        status: 500,
-        headers: { "Content-Type": "application/json", ...corsHeaders },
-      });
+      return jsonResponse({ error: "Function is not configured" }, 500, corsHeaders);
     }
 
     const authHeader = req.headers.get("Authorization") ?? "";
+    if (!authHeader.startsWith("Bearer ")) {
+      return jsonResponse({ error: "Unauthorized" }, 401, corsHeaders);
+    }
 
     // User-scoped client for auth
     const userClient = createClient(supabaseUrl, anonKey, {
@@ -44,10 +86,7 @@ Deno.serve(async (req) => {
 
     const { data: userData, error: userErr } = await userClient.auth.getUser();
     if (userErr || !userData?.user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { "Content-Type": "application/json", ...corsHeaders },
-      });
+      return jsonResponse({ error: "Unauthorized" }, 401, corsHeaders);
     }
 
     const userId = userData.user.id;
@@ -62,31 +101,34 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     if (profErr || profile?.role !== "admin") {
-      return new Response(JSON.stringify({ error: "Forbidden" }), {
-        status: 403,
-        headers: { "Content-Type": "application/json", ...corsHeaders },
-      });
+      return jsonResponse({ error: "Forbidden" }, 403, corsHeaders);
     }
 
-    const body = await req.json();
+    let body: Record<string, unknown>;
+    try {
+      body = await req.json();
+    } catch {
+      return jsonResponse({ error: "Invalid JSON body" }, 400, corsHeaders);
+    }
+
     const employeeId = String(body.employeeId ?? "").trim();
     const employeeName = String(body.employeeName ?? "").trim();
     const email = String(body.email ?? "").trim().toLowerCase();
-    const redirectTo = String(body.redirectTo ?? "").trim();
+    let redirectTo: string;
+
+    try {
+      redirectTo = getRedirectTo(body.redirectTo);
+    } catch {
+      return jsonResponse({ error: "Invalid redirect URL" }, 400, corsHeaders);
+    }
 
     if (!employeeId || !email) {
-      return new Response(JSON.stringify({ error: "employeeId and email required" }), {
-        status: 400,
-        headers: { "Content-Type": "application/json", ...corsHeaders },
-      });
+      return jsonResponse({ error: "employeeId and email required" }, 400, corsHeaders);
     }
 
     const looksLikeEmail = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
     if (!looksLikeEmail) {
-      return new Response(JSON.stringify({ error: "Invalid email" }), {
-        status: 400,
-        headers: { "Content-Type": "application/json", ...corsHeaders },
-      });
+      return jsonResponse({ error: "Invalid email" }, 400, corsHeaders);
     }
 
     // Update employee email by id
@@ -98,50 +140,37 @@ Deno.serve(async (req) => {
       .limit(1);
 
     if (updErr || !updated || updated.length === 0) {
-      return new Response(
-        JSON.stringify({
+      return jsonResponse(
+        {
           error: "Employee not found or update failed",
           details: updErr?.message,
-        }),
-        {
-          status: 404,
-          headers: { "Content-Type": "application/json", ...corsHeaders },
         },
+        404,
+        corsHeaders,
       );
     }
 
     const { data: inviteData, error: inviteErr } = await adminClient.auth.admin.inviteUserByEmail(email, {
-      redirectTo: redirectTo || undefined,
+      redirectTo,
+      data: { display_name: employeeName || updated[0]?.name },
     });
 
     if (inviteErr) {
-      return new Response(JSON.stringify({ error: inviteErr.message }), {
-        status: 400,
-        headers: { "Content-Type": "application/json", ...corsHeaders },
-      });
+      return jsonResponse({ error: inviteErr.message }, 400, corsHeaders);
     }
 
-    return new Response(
-      JSON.stringify({
+    return jsonResponse(
+      {
         ok: true,
         invited: inviteData?.user?.email,
         employee: updated[0],
         employeeName: employeeName || updated[0]?.name,
-      }),
-      {
-        status: 200,
-        headers: { "Content-Type": "application/json", ...corsHeaders },
       },
+      200,
+      corsHeaders,
     );
   } catch (e) {
-    return new Response(JSON.stringify({ error: String(e) }), {
-      status: 500,
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-      },
-    });
+    console.error("invite-employee failed", e);
+    return jsonResponse({ error: "Internal server error" }, 500, corsHeaders);
   }
 });

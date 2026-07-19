@@ -1,24 +1,22 @@
 # FreshShift
 
-Smart and simple shift planning tool for Yes Fresh and Fresh Fries. Allows employees to submit their weekly availability online and automatically generates a weekly plan for two stores.
+Shift planning for Yes Fresh and Fresh Fries. Employees submit their weekly availability and the admin prepares and releases the plan for both stores.
 
 ## Features
 
 - **Employee Self-Service**: Employees can submit their weekly availability (Mon-Sat) with specific time slots
-- **Automatic Schedule Generation**: Creates optimized schedules based on:
-  - Maximum 18 hours/week for part-time workers (Aushilfe)
-  - Minimum staffing requirements (Yes Fresh: 3, Fresh Fries: 2)
-  - Break reminders for shifts over 6 hours
-- **Admin Dashboard**: Parents can review all submitted availabilities, generate and release schedules
+- **Manual Schedule Planning**: Admins can prepare and release weekly schedules
+- **Admin Dashboard**: Review submitted availability, absences, requests, and schedules
 - **Personal Schedule View**: Each employee can view their assigned shifts after release
+- **Passwordless Login**: Invited employees and admins authenticate with Supabase Magic Links
 - **Responsive Design**: Works on desktop and mobile devices
 
 ## Quick Start
 
-1. Open `index.html` in a web browser
-2. Select an existing employee or create a new one
-3. Enter your availability for the week
-4. Admin can access the management view via "Admin-Bereich"
+1. Start a static web server, for example `python3 -m http.server 3000`
+2. Open `http://localhost:3000`
+3. Enter the email address of an invited FreshShift account
+4. Open the Magic Link and use the role-specific employee or admin view
 
 ## Project Structure
 
@@ -28,18 +26,24 @@ freshshift/
 ├── css/
 │   └── styles.css      # All styles (responsive)
 ├── js/
-│   ├── data.js         # Data management (LocalStorage)
-│   ├── scheduler.js    # Automatic schedule generation logic
+│   ├── data.js         # Data selectors and date utilities
+│   ├── cloud-data.js   # RLS-backed Supabase data adapter
+│   ├── supabase.js     # Passwordless Auth client
 │   └── app.js          # Main application logic
+├── supabase/
+│   ├── functions/      # Authenticated server-side functions
+│   └── migrations/     # Versioned production database schema and seed data
+├── tests/              # Dependency-free Node smoke tests
 └── README.md
 ```
 
 ## Data Storage
 
-All data is stored in the browser's LocalStorage:
-- `freshshift_employees` - Employee list
-- `freshshift_availabilities` - Weekly availability submissions
-- `freshshift_schedules` - Generated and released schedules
+Operational data is stored in Supabase. After authentication, the browser loads only the rows permitted by Row Level Security into an in-memory cache. LocalStorage is used only for harmless UI preferences such as the last selected store.
+
+Employee invitations run through the authenticated `invite-employee` Edge Function. Production employee records are restored separately and are deliberately excluded from Git history. Never expose a service-role key in browser code.
+
+Before deploying a new domain, add its URL to the Supabase Auth Site URL and Redirect URLs. Uninvited email addresses cannot create accounts from the login screen.
 
 ## Business Rules
 
@@ -48,9 +52,8 @@ All data is stored in the browser's LocalStorage:
 - **Fresh Fries**: Minimum 2 employees per day
 - **Breaks**: Reminder for shifts longer than 6 hours
 
-## Future Enhancements
+## Next Milestone
 
-- Firebase/Google Sheets backend for multi-device sync
-- Email/SMS notifications
-- Export to PDF
-- Drag-and-drop schedule editing
+- Bootstrap the first admin and invite employee accounts
+- Add scheduling-rule validation and broader browser integration tests
+- Harden remaining dynamic HTML rendering before production rollout

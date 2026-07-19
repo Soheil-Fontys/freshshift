@@ -13,67 +13,109 @@ const App = {
     employeeStore: 'fresh_fries',
 
 
-    init() {
+    async init() {
         this.adminStore = localStorage.getItem('freshshift_admin_store') || 'fresh_fries';
         this.employeeStore = localStorage.getItem('freshshift_employee_store') || 'fresh_fries';
 
         this.bindEvents();
-        this.loadEmployeeDropdown();
-
-        if (window.FreshShiftSupabase?.init) {
-            window.FreshShiftSupabase.init();
-        }
         this.populateAdminStoreSelect();
         this.updateWeekDisplay();
         this.updateMonthDisplay();
         this.updateAvailWeekDisplay();
-        this.checkExistingSession();
+        this.showScreen('login-screen');
+        this.setAuthStatus('Sitzung wird geprüft…');
+
+        try {
+            await window.FreshShiftSupabase.init((event, session) => this.handleAuthStateChange(event, session));
+        } catch (error) {
+            this.setAuthStatus(error?.message || 'Cloud-Verbindung fehlgeschlagen.', true);
+        }
     },
 
     // ===========================
     // Session Management
     // ===========================
-    checkExistingSession() {
-        // Check if admin is logged in
-        if (DataManager.isAdminSession()) {
-            this.showScreen('admin-screen');
+    async handleAuthStateChange(event, session) {
+        const signOutButton = document.getElementById('auth-signout');
+
+        if (!session?.user) {
+            this.currentUser = null;
+            DataManager.disconnectCloud();
+            if (signOutButton) signOutButton.style.display = 'none';
+            this.showScreen('login-screen');
+            if (event !== 'INITIAL_SESSION') this.setAuthStatus('Abgemeldet.');
+            else this.setAuthStatus('');
             return;
         }
 
-        // Check if employee is logged in
-        const savedUser = DataManager.getCurrentUser();
-        if (savedUser) {
-            // Verify employee still exists
-            const employee = DataManager.getEmployee(savedUser.id);
-            if (employee) {
-                this.currentUser = employee;
-                this.showScreen('dashboard-screen');
-                return;
-            } else {
-                // Employee was deleted, clear session
-                DataManager.clearCurrentUser();
-            }
-        }
+        if (signOutButton) signOutButton.style.display = 'block';
+        this.setAuthStatus('Daten werden geladen…');
 
-        // No valid session, show login screen
-        this.showScreen('login-screen');
+        try {
+            const context = await DataManager.connectToCloud(window.FreshShiftSupabase.ensureClient());
+            this.populateAdminStoreSelect();
+
+            if (context.role === 'admin') {
+                this.currentUser = null;
+                this.setAuthStatus('');
+                this.showScreen('admin-screen');
+                return;
+            }
+
+            if (!context.employee) {
+                this.currentUser = null;
+                this.showScreen('login-screen');
+                this.setAuthStatus('Dieses Konto ist noch keinem Mitarbeiter zugeordnet.', true);
+                return;
+            }
+
+            this.currentUser = context.employee;
+            const stores = this.getUserStores();
+            this.employeeStore = context.employee.primaryStore || stores[0] || 'fresh_fries';
+            localStorage.setItem('freshshift_employee_store', this.employeeStore);
+            this.setAuthStatus('');
+            this.showScreen('dashboard-screen');
+        } catch (error) {
+            this.currentUser = null;
+            DataManager.disconnectCloud();
+            this.showScreen('login-screen');
+            this.setAuthStatus(error?.message || 'Daten konnten nicht geladen werden.', true);
+        }
+    },
+
+    setAuthStatus(message, isError = false) {
+        const status = document.getElementById('auth-status');
+        if (!status) return;
+        status.textContent = message || '';
+        status.classList.toggle('login-error', Boolean(isError));
+    },
+
+    async sendAuthLink() {
+        const email = document.getElementById('auth-email')?.value || '';
+        const button = document.getElementById('auth-send-link');
+        if (button) button.disabled = true;
+        this.setAuthStatus('Anmeldelink wird gesendet…');
+
+        try {
+            await window.FreshShiftSupabase.sendMagicLink(email);
+            this.setAuthStatus('Anmeldelink gesendet. Bitte öffne deine Email.');
+        } catch (error) {
+            this.setAuthStatus(error?.message || 'Anmeldelink konnte nicht gesendet werden.', true);
+        } finally {
+            if (button) button.disabled = false;
+        }
     },
 
     // ===========================
     // Event Bindings
     // ===========================
     bindEvents() {
-        // Login Screen - Toggle
-        document.querySelectorAll('.login-toggle-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => this.handleLoginToggle(e.target));
+        // Login Screen
+        document.getElementById('auth-send-link').addEventListener('click', () => this.sendAuthLink());
+        document.getElementById('auth-email').addEventListener('keypress', (event) => {
+            if (event.key === 'Enter') this.sendAuthLink();
         });
-
-        // Login Screen - Actions
-        document.getElementById('login-btn').addEventListener('click', () => this.handleLogin());
-        document.getElementById('admin-login-btn').addEventListener('click', () => this.handleAdminLogin());
-        document.getElementById('admin-password').addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') this.handleAdminLogin();
-        });
+        document.getElementById('auth-signout').addEventListener('click', () => this.logout());
 
         // Dashboard Menu
         document.getElementById('menu-toggle').addEventListener('click', () => this.toggleMenu());
@@ -187,9 +229,6 @@ const App = {
         // Data (Backup/Import)
         const exportBtn = document.getElementById('export-data');
         if (exportBtn) exportBtn.addEventListener('click', () => this.exportBackup());
-
-        const importBtn = document.getElementById('import-data');
-        if (importBtn) importBtn.addEventListener('click', () => this.importBackup());
 
         // Absences
         document.getElementById('save-absence').addEventListener('click', () => this.saveAbsence());
@@ -589,13 +628,13 @@ const App = {
         `;
     },
 
-    acceptShiftRequest(payload) {
+    async acceptShiftRequest(payload) {
         try {
             const data = JSON.parse(decodeURIComponent(payload));
-            this.respondShiftRequest(data, 'accepted', null);
+            await this.respondShiftRequest(data, 'accepted', null);
             this.showToast('Schichtanfrage angenommen.', 'success');
-        } catch {
-            this.showToast('Schichtanfrage konnte nicht verarbeitet werden.', 'error');
+        } catch (error) {
+            this.showToast(error?.message || 'Schichtanfrage konnte nicht verarbeitet werden.', 'error');
         }
     },
 
@@ -614,20 +653,24 @@ const App = {
         }
     },
 
-    submitShiftRequestDecline() {
+    async submitShiftRequestDecline() {
         const reason = document.getElementById('shift-request-reason')?.value?.trim() || '';
         if (!reason) {
             this.showToast('Bitte einen Grund eingeben.', 'error');
             return;
         }
         if (!this.pendingShiftRequest) return;
-        this.respondShiftRequest(this.pendingShiftRequest, 'declined', reason);
-        this.pendingShiftRequest = null;
-        this.hideModals();
-        this.showToast('Schichtanfrage abgelehnt.', 'success');
+        try {
+            await this.respondShiftRequest(this.pendingShiftRequest, 'declined', reason);
+            this.pendingShiftRequest = null;
+            this.hideModals();
+            this.showToast('Schichtanfrage abgelehnt.', 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'Schichtanfrage konnte nicht verarbeitet werden.', 'error');
+        }
     },
 
-    respondShiftRequest({ storeId, weekKey, dayKey, employeeId }, status, reason) {
+    async respondShiftRequest({ storeId, weekKey, dayKey, employeeId }, status, reason) {
         const schedule = DataManager.getScheduleForWeek(weekKey, storeId);
         const dayShifts = schedule?.shifts?.[dayKey] || [];
         const shift = dayShifts.find(s => s.employeeId === employeeId && s.requestStatus === 'pending');
@@ -636,16 +679,10 @@ const App = {
             return;
         }
 
-        shift.requestStatus = status;
-        shift.respondedAt = new Date().toISOString();
-        shift.responseReason = reason || null;
+        await DataManager.respondToShiftRequest(shift.id, status, reason);
 
-        schedule.storeId = storeId;
-        DataManager.saveSchedule(schedule);
-
-        // Notify admin (local only)
         const employee = DataManager.getEmployee(employeeId);
-        DataManager.addNotification({
+        await DataManager.addNotification({
             target: 'admin',
             type: 'shift_request_response',
             storeId,
@@ -663,7 +700,7 @@ const App = {
 
     pendingShiftRequest: null,
 
-    approveAbsenceRequest(payload) {
+    async approveAbsenceRequest(payload) {
         try {
             const { notificationId, absenceId } = JSON.parse(decodeURIComponent(payload));
             const absence = DataManager.getAbsence(absenceId);
@@ -672,25 +709,25 @@ const App = {
                 return;
             }
 
-            DataManager.updateAbsence({
+            await DataManager.updateAbsence({
                 id: absenceId,
                 status: 'approved',
                 respondedAt: new Date().toISOString(),
                 responseReason: null
             });
 
-            DataManager.markNotificationRead(notificationId);
+            await DataManager.markNotificationRead(notificationId);
             this.updateAdminNotifications();
             this.renderAbsencesOverview();
             this.renderScheduleEditor();
 
             this.showToast('Urlaubsanfrage genehmigt.', 'success');
-        } catch {
-            this.showToast('Anfrage konnte nicht verarbeitet werden.', 'error');
+        } catch (error) {
+            this.showToast(error?.message || 'Anfrage konnte nicht verarbeitet werden.', 'error');
         }
     },
 
-    denyAbsenceRequest(payload) {
+    async denyAbsenceRequest(payload) {
         try {
             const { notificationId, absenceId } = JSON.parse(decodeURIComponent(payload));
             const absence = DataManager.getAbsence(absenceId);
@@ -701,20 +738,20 @@ const App = {
 
             const reason = prompt('Grund für Ablehnung (optional):', '');
 
-            DataManager.updateAbsence({
+            await DataManager.updateAbsence({
                 id: absenceId,
                 status: 'declined',
                 respondedAt: new Date().toISOString(),
                 responseReason: reason || null
             });
 
-            DataManager.markNotificationRead(notificationId);
+            await DataManager.markNotificationRead(notificationId);
             this.updateAdminNotifications();
             this.renderAbsencesOverview();
 
             this.showToast('Urlaubsanfrage abgelehnt.', 'warning');
-        } catch {
-            this.showToast('Anfrage konnte nicht verarbeitet werden.', 'error');
+        } catch (error) {
+            this.showToast(error?.message || 'Anfrage konnte nicht verarbeitet werden.', 'error');
         }
     },
  
@@ -813,7 +850,7 @@ const App = {
         this.showModal('default-availability-modal');
     },
 
-    saveDefaultAvailability() {
+    async saveDefaultAvailability() {
         const employeeId = this.currentDefaultAvailabilityEmployeeId;
         const employee = DataManager.getEmployee(employeeId);
         if (!employee) return;
@@ -838,13 +875,17 @@ const App = {
             }
         };
 
-        DataManager.updateEmployee({ id: employeeId, defaultAvailability: merged });
-        this.hideModals();
-        this.renderEmployeesTab();
-        this.showToast('Standardverfügbarkeit gespeichert!', 'success');
+        try {
+            await DataManager.updateEmployee({ id: employeeId, defaultAvailability: merged });
+            this.hideModals();
+            this.renderEmployeesTab();
+            this.showToast('Standardverfügbarkeit gespeichert!', 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'Standardverfügbarkeit konnte nicht gespeichert werden.', 'error');
+        }
     },
 
-    clearDefaultAvailability() {
+    async clearDefaultAvailability() {
         const employeeId = this.currentDefaultAvailabilityEmployeeId;
         const employee = DataManager.getEmployee(employeeId);
         if (!employee) return;
@@ -853,10 +894,14 @@ const App = {
         const merged = { ...(employee.defaultAvailability || {}) };
         delete merged[storeId];
 
-        DataManager.updateEmployee({ id: employeeId, defaultAvailability: merged });
-        this.hideModals();
-        this.renderEmployeesTab();
-        this.showToast('Standardverfügbarkeit entfernt.', 'success');
+        try {
+            await DataManager.updateEmployee({ id: employeeId, defaultAvailability: merged });
+            this.hideModals();
+            this.renderEmployeesTab();
+            this.showToast('Standardverfügbarkeit entfernt.', 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'Standardverfügbarkeit konnte nicht entfernt werden.', 'error');
+        }
     },
 
     currentDefaultAvailabilityEmployeeId: null,
@@ -869,45 +914,19 @@ const App = {
         const email = prompt(`Email für ${employeeName}:`, '');
         if (!email) return;
 
-        const token = await window.FreshShiftSupabase?.getAccessToken?.();
-        const url = window.FRESHSHIFT_SUPABASE_URL || localStorage.getItem('freshshift_supabase_url') || '';
-        const anonKey = window.FRESHSHIFT_SUPABASE_ANON_KEY || localStorage.getItem('freshshift_supabase_anon_key') || '';
-
-        if (!token || !url) {
-            this.showToast('Cloud Login fehlt. Bitte zuerst per Email (Magic Link) verbinden.', 'error');
-            return;
-        }
-
-        if (!anonKey) {
-            this.showToast('Supabase Anon Key fehlt (Konfiguration).', 'error');
-            return;
-        }
-
         try {
-            const res = await fetch(`${url}/functions/v1/invite-employee`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'apikey': anonKey,
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({
-                    employeeId: id,
-                    employeeName,
-                    email,
-                    redirectTo: window.location.origin + window.location.pathname
-                })
+            await window.FreshShiftSupabase.invoke('invite-employee', {
+                employeeId: id,
+                employeeName,
+                email,
+                redirectTo: window.location.origin + window.location.pathname
             });
-
-            const json = await res.json().catch(() => ({}));
-            if (!res.ok) {
-                throw new Error(json.error || 'Invite fehlgeschlagen');
-            }
-
+            await DataManager.reloadCloudData();
+            this.renderEmployeesTab();
             this.showToast(`Einladung gesendet an ${email}`, 'success');
         } catch (e) {
             const msg = e?.message || 'Invite fehlgeschlagen';
-            this.showToast(msg === 'Failed to fetch' ? 'Invite fehlgeschlagen (Netzwerk/CORS). Bitte Seite neu laden und erneut versuchen.' : msg, 'error');
+            this.showToast(msg === 'Failed to fetch' ? 'Invite fehlgeschlagen (Netzwerk/CORS).' : msg, 'error');
         }
     },
 
@@ -928,7 +947,7 @@ const App = {
         this.showModal('absence-request-modal');
     },
 
-    submitAbsenceRequest() {
+    async submitAbsenceRequest() {
         if (!this.currentUser) return;
 
         const type = document.getElementById('absence-request-type').value;
@@ -947,32 +966,37 @@ const App = {
 
         const status = type === 'krank' ? 'approved' : 'pending';
 
-        const absence = DataManager.addAbsence({
-            employeeId: this.currentUser.id,
-            startDate,
-            endDate,
-            type,
-            note: note || null,
-            status,
-            requestedBy: 'employee',
-            requestedAt: new Date().toISOString()
-        });
+        try {
+            const absence = await DataManager.addAbsence({
+                employeeId: this.currentUser.id,
+                storeId: this.employeeStore,
+                startDate,
+                endDate,
+                type,
+                note: note || null,
+                status,
+                requestedBy: 'employee',
+                requestedAt: new Date().toISOString()
+            });
 
-        // Notify admin (local only)
-        const typeLabel = type === 'urlaub' ? 'Urlaub' : type === 'krank' ? 'Krankheit' : 'Sonstiges';
-        DataManager.addNotification({
-            target: 'admin',
-            type: type === 'krank' ? 'absence_notice' : 'absence_request',
-            employeeId: this.currentUser.id,
-            employeeName: this.currentUser.name,
-            absenceId: absence.id,
-            message: `${typeLabel}: ${startDate}${endDate !== startDate ? ' bis ' + endDate : ''}`,
-            reason: note || null
-        });
+            const typeLabel = type === 'urlaub' ? 'Urlaub' : type === 'krank' ? 'Krankheit' : 'Sonstiges';
+            await DataManager.addNotification({
+                target: 'admin',
+                type: type === 'krank' ? 'absence_notice' : 'absence_request',
+                storeId: this.employeeStore,
+                employeeId: this.currentUser.id,
+                employeeName: this.currentUser.name,
+                absenceId: absence.id,
+                message: `${typeLabel}: ${startDate}${endDate !== startDate ? ' bis ' + endDate : ''}`,
+                reason: note || null
+            });
 
-        this.hideModals();
-        this.renderEmployeeAbsencesPage();
-        this.showToast(type === 'krank' ? 'Krankheit gemeldet.' : 'Urlaubsanfrage gesendet.', 'success');
+            this.hideModals();
+            this.renderEmployeeAbsencesPage();
+            this.showToast(type === 'krank' ? 'Krankheit gemeldet.' : 'Urlaubsanfrage gesendet.', 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'Abwesenheit konnte nicht gesendet werden.', 'error');
+        }
     },
 
     renderWeekOverview() {
@@ -1428,6 +1452,7 @@ const App = {
     // ===========================
     loadEmployeeDropdown() {
         const select = document.getElementById('employee-select');
+        if (!select) return;
         const employees = DataManager.getEmployees();
 
         const storeOrder = ['fresh_fries', 'yes_fresh'];
@@ -1563,87 +1588,23 @@ const App = {
     },
 
 
-    handleLogin() {
-        const selectValue = document.getElementById('employee-select').value;
-        
-        if (!selectValue) {
-            this.showToast('Bitte wähle deinen Namen aus.', 'error');
-            return;
-        }
-
-        const employee = DataManager.getEmployee(selectValue);
-        if (!employee) {
-            this.showToast('Mitarbeiter nicht gefunden.', 'error');
-            return;
-        }
-
-        this.currentUser = employee;
-        DataManager.setCurrentUser(employee);
-
-        const stores = this.getUserStores();
-        this.employeeStore = employee.primaryStore || employee.store || stores[0] || 'fresh_fries';
-        localStorage.setItem('freshshift_employee_store', this.employeeStore);
-
-        this.showScreen('dashboard-screen');
-        this.showToast(`Hallo ${employee.name}!`, 'success');
-    },
-
-    handleAdminLogin() {
-        const password = document.getElementById('admin-password').value;
-        const errorEl = document.getElementById('admin-error');
-        
-        // Check password
-        if (password !== 'zabi4886093') {
-            errorEl.textContent = 'Falsches Passwort. Bitte erneut versuchen.';
-            document.getElementById('admin-password').value = '';
-            document.getElementById('admin-password').focus();
-            return;
-        }
-        
-        errorEl.textContent = '';
-        document.getElementById('admin-password').value = '';
-        DataManager.setAdminSession();
-        this.showScreen('admin-screen');
-        this.showToast('Willkommen im Admin-Bereich!', 'success');
-    },
-
-    handleLoginToggle(btn) {
-        const type = btn.dataset.type;
-        
-        // Update toggle buttons
-        document.querySelectorAll('.login-toggle-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        
-        // Show corresponding section
-        document.querySelectorAll('.login-section').forEach(s => s.classList.remove('active'));
-        document.getElementById(`${type}-login`).classList.add('active');
-        
-        // Clear any errors
-        document.getElementById('admin-error').textContent = '';
-    },
-
-    logout() {
+    async logout() {
         this.currentUser = null;
-        DataManager.clearCurrentUser();
-        document.getElementById('employee-select').value = '';
-        this.showScreen('login-screen');
-        this.resetLoginForm();
+        try {
+            await window.FreshShiftSupabase.signOut();
+        } catch (error) {
+            this.showToast(error?.message || 'Abmelden fehlgeschlagen.', 'error');
+        }
     },
 
-    adminLogout() {
-        DataManager.clearCurrentUser();
-        this.showScreen('login-screen');
-        this.resetLoginForm();
+    async adminLogout() {
+        await this.logout();
     },
 
     resetLoginForm() {
-        // Reset to employee login
-        document.querySelectorAll('.login-toggle-btn').forEach(b => b.classList.remove('active'));
-        document.querySelector('.login-toggle-btn[data-type="employee"]').classList.add('active');
-        document.querySelectorAll('.login-section').forEach(s => s.classList.remove('active'));
-        document.getElementById('employee-login').classList.add('active');
-        document.getElementById('admin-error').textContent = '';
-        document.getElementById('admin-password').value = '';
+        const email = document.getElementById('auth-email');
+        if (email) email.value = '';
+        this.setAuthStatus('');
     },
 
     // ===========================
@@ -1695,7 +1656,7 @@ const App = {
         return `${hh}:${mm}`;
     },
 
-    applyEmployeeShiftDeviation(kind, minutes, reason) {
+    async applyEmployeeShiftDeviation(kind, minutes, reason) {
         if (!this.currentUser) return null;
 
         const today = new Date();
@@ -1729,15 +1690,18 @@ const App = {
                 if (reason) shift.deviation.reason = reason;
             }
 
-            schedule.storeId = storeId;
-            DataManager.saveSchedule(schedule);
+            await DataManager.reportShiftDeviation(shift.id, {
+                actualStart: shift.actualStart,
+                actualEnd: shift.actualEnd,
+                deviation: shift.deviation
+            });
             return storeId;
         }
 
         return null;
     },
 
-    submitLateReport() {
+    async submitLateReport() {
         if (!this.currentUser) {
             this.showToast('Bitte melde dich zuerst an.', 'error');
             return;
@@ -1746,33 +1710,35 @@ const App = {
         const minutes = parseInt(document.getElementById('late-minutes').value, 10) || 0;
         const reason = document.getElementById('late-reason').value;
 
-        const storeId = this.applyEmployeeShiftDeviation('late', minutes, reason);
+        try {
+            const storeId = await this.applyEmployeeShiftDeviation('late', minutes, reason);
+            const today = new Date();
+            await DataManager.addNotification({
+                target: 'admin',
+                type: 'late',
+                employeeId: this.currentUser.id,
+                employeeName: this.currentUser.name,
+                storeId: storeId || this.employeeStore,
+                weekKey: DateUtils.getWeekKey(today),
+                dayKey: DateUtils.getTodayKey(),
+                date: today.toISOString().split('T')[0],
+                message: `Kommt ${minutes} Minuten später`,
+                reason: reason || null
+            });
 
-        const today = new Date();
-        const notification = {
-            type: 'late',
-            employeeId: this.currentUser.id,
-            employeeName: this.currentUser.name,
-            storeId: storeId || this.employeeStore,
-            weekKey: DateUtils.getWeekKey(today),
-            dayKey: DateUtils.getTodayKey(),
-            date: today.toISOString().split('T')[0],
-            message: `Kommt ${minutes} Minuten später`,
-            reason: reason || null
-        };
-
-        DataManager.addNotification(notification);
-
-        this.hideModals();
-        document.getElementById('late-reason').value = '';
-        this.renderDashboard();
-        this.showToast('Meldung gesendet! (Ohne Backend nur auf diesem Gerät sichtbar)', 'success');
+            this.hideModals();
+            document.getElementById('late-reason').value = '';
+            this.renderDashboard();
+            this.showToast('Meldung gesendet!', 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'Meldung konnte nicht gesendet werden.', 'error');
+        }
     },
 
     // ===========================
     // Report Early Leave (Employee)
     // ===========================
-    submitEarlyReport() {
+    async submitEarlyReport() {
         if (!this.currentUser) {
             this.showToast('Bitte melde dich zuerst an.', 'error');
             return;
@@ -1781,27 +1747,29 @@ const App = {
         const minutes = parseInt(document.getElementById('early-minutes').value, 10) || 0;
         const reason = document.getElementById('early-reason').value;
 
-        const storeId = this.applyEmployeeShiftDeviation('early', minutes, reason);
+        try {
+            const storeId = await this.applyEmployeeShiftDeviation('early', minutes, reason);
+            const today = new Date();
+            await DataManager.addNotification({
+                target: 'admin',
+                type: 'early',
+                employeeId: this.currentUser.id,
+                employeeName: this.currentUser.name,
+                storeId: storeId || this.employeeStore,
+                weekKey: DateUtils.getWeekKey(today),
+                dayKey: DateUtils.getTodayKey(),
+                date: today.toISOString().split('T')[0],
+                message: `Geht ${minutes} Minuten früher`,
+                reason: reason || null
+            });
 
-        const today = new Date();
-        const notification = {
-            type: 'early',
-            employeeId: this.currentUser.id,
-            employeeName: this.currentUser.name,
-            storeId: storeId || this.employeeStore,
-            weekKey: DateUtils.getWeekKey(today),
-            dayKey: DateUtils.getTodayKey(),
-            date: today.toISOString().split('T')[0],
-            message: `Geht ${minutes} Minuten früher`,
-            reason: reason || null
-        };
-
-        DataManager.addNotification(notification);
-
-        this.hideModals();
-        document.getElementById('early-reason').value = '';
-        this.renderDashboard();
-        this.showToast('Meldung gesendet! (Ohne Backend nur auf diesem Gerät sichtbar)', 'success');
+            this.hideModals();
+            document.getElementById('early-reason').value = '';
+            this.renderDashboard();
+            this.showToast('Meldung gesendet!', 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'Meldung konnte nicht gesendet werden.', 'error');
+        }
     },
 
     // ===========================
@@ -1826,10 +1794,14 @@ const App = {
         card.style.display = card.style.display === 'none' ? 'block' : 'none';
     },
 
-    clearNotifications() {
-        DataManager.markAllNotificationsRead();
-        this.updateAdminNotifications();
-        this.showToast('Alle Meldungen als gelesen markiert.', 'success');
+    async clearNotifications() {
+        try {
+            await DataManager.markAllNotificationsRead();
+            this.updateAdminNotifications();
+            this.showToast('Alle Meldungen als gelesen markiert.', 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'Meldungen konnten nicht aktualisiert werden.', 'error');
+        }
     },
 
     // ===========================
@@ -1904,7 +1876,7 @@ const App = {
         notes.style.display = available ? 'block' : 'none';
     },
 
-    handleAvailabilitySubmit(e) {
+    async handleAvailabilitySubmit(e) {
         e.preventDefault();
         
         if (!this.currentUser) {
@@ -1935,8 +1907,12 @@ const App = {
             submittedAt: new Date().toISOString()
         };
 
-        DataManager.saveAvailability(availability);
-        this.showToast('Verfügbarkeit gespeichert!', 'success');
+        try {
+            await DataManager.saveAvailability(availability);
+            this.showToast('Verfügbarkeit gespeichert!', 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'Verfügbarkeit konnte nicht gespeichert werden.', 'error');
+        }
     },
 
     // ===========================
@@ -2301,13 +2277,13 @@ const App = {
         this.showModal('shift-modal');
     },
 
-    quickAssign(start, end) {
+    async quickAssign(start, end) {
         document.getElementById('shift-start').value = start;
         document.getElementById('shift-end').value = end;
-        this.saveShift();
+        await this.saveShift();
     },
 
-    saveShift() {
+    async saveShift() {
         if (!this.currentEditCell) return;
 
         const { employeeId, dayKey } = this.currentEditCell;
@@ -2362,17 +2338,6 @@ const App = {
             shift.requestedAt = new Date().toISOString();
             shift.requestedBy = 'admin';
 
-            // Local notification (no backend): only visible on same device
-            DataManager.addNotification({
-                target: 'employee',
-                targetEmployeeId: employeeId,
-                type: 'shift_request',
-                storeId: this.adminStore,
-                employeeId: employeeId,
-                employeeName: employee.name,
-                message: `Schichtanfrage: ${start}–${end}`,
-                reason: 'Bitte annehmen oder ablehnen.'
-            });
         }
 
         // Check for deviations
@@ -2411,15 +2376,32 @@ const App = {
         schedule.shifts[dayKey].push(shift);
 
         schedule.storeId = this.adminStore;
-        DataManager.saveSchedule(schedule);
-        this.hideModals();
-        this.renderScheduleEditor();
-        this.renderWeekDeviations();
-        this.updateReleaseButton();
-        this.showToast(needsRequest ? 'Schichtanfrage gesendet!' : 'Schicht eingetragen!', needsRequest ? 'warning' : 'success');
+        try {
+            await DataManager.saveSchedule(schedule);
+            if (needsRequest) {
+                await DataManager.addNotification({
+                    target: 'employee',
+                    targetEmployeeId: employeeId,
+                    type: 'shift_request',
+                    storeId: this.adminStore,
+                    employeeId,
+                    employeeName: employee.name,
+                    message: `Schichtanfrage: ${start}–${end}`,
+                    reason: 'Bitte annehmen oder ablehnen.'
+                });
+            }
+
+            this.hideModals();
+            this.renderScheduleEditor();
+            this.renderWeekDeviations();
+            this.updateReleaseButton();
+            this.showToast(needsRequest ? 'Schichtanfrage gesendet!' : 'Schicht eingetragen!', needsRequest ? 'warning' : 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'Schicht konnte nicht gespeichert werden.', 'error');
+        }
     },
 
-    removeShift() {
+    async removeShift() {
         if (!this.currentEditCell) return;
 
         const { employeeId, dayKey } = this.currentEditCell;
@@ -2429,7 +2411,12 @@ const App = {
         if (schedule?.shifts?.[dayKey]) {
             schedule.shifts[dayKey] = schedule.shifts[dayKey].filter(s => s.employeeId !== employeeId);
             schedule.storeId = this.adminStore;
-            DataManager.saveSchedule(schedule);
+            try {
+                await DataManager.saveSchedule(schedule);
+            } catch (error) {
+                this.showToast(error?.message || 'Schicht konnte nicht entfernt werden.', 'error');
+                return;
+            }
         }
 
         this.hideModals();
@@ -2438,26 +2425,34 @@ const App = {
         this.showToast('Schicht entfernt.', 'success');
     },
 
-    saveSchedule() {
+    async saveSchedule() {
         const weekKey = DateUtils.getWeekKey(this.currentWeek);
         let schedule = DataManager.getScheduleForWeek(weekKey, this.adminStore);
         
         if (schedule) {
             schedule.savedAt = new Date().toISOString();
             schedule.storeId = this.adminStore;
-            DataManager.saveSchedule(schedule);
-            this.showToast('Plan gespeichert!', 'success');
-            this.updateReleaseButton();
+            try {
+                await DataManager.saveSchedule(schedule);
+                this.showToast('Plan gespeichert!', 'success');
+                this.updateReleaseButton();
+            } catch (error) {
+                this.showToast(error?.message || 'Plan konnte nicht gespeichert werden.', 'error');
+            }
         } else {
             this.showToast('Noch keine Schichten eingetragen.', 'warning');
         }
     },
 
-    releaseSchedule() {
+    async releaseSchedule() {
         const weekKey = DateUtils.getWeekKey(this.currentWeek);
-        DataManager.releaseSchedule(weekKey, this.adminStore);
-        this.updateReleaseButton();
-        this.showToast('Plan freigegeben! Mitarbeiter können ihn jetzt sehen.', 'success');
+        try {
+            await DataManager.releaseSchedule(weekKey, this.adminStore);
+            this.updateReleaseButton();
+            this.showToast('Plan freigegeben! Mitarbeiter können ihn jetzt sehen.', 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'Plan konnte nicht freigegeben werden.', 'error');
+        }
     },
 
      pendingCopyContext: null,
@@ -2569,7 +2564,7 @@ const App = {
          this.showModal('copy-week-modal');
      },
 
-     applyCopyWeek(skipConflicts) {
+     async applyCopyWeek(skipConflicts) {
          if (!this.pendingCopyContext) return;
 
          const { lastWeekKey, currentWeekKey, lastWeekSchedule, dates } = this.pendingCopyContext;
@@ -2624,7 +2619,12 @@ const App = {
              createdAt: new Date().toISOString()
          };
 
-         DataManager.saveSchedule(newSchedule);
+         try {
+             await DataManager.saveSchedule(newSchedule);
+         } catch (error) {
+             this.showToast(error?.message || 'Schichten konnten nicht kopiert werden.', 'error');
+             return;
+         }
          this.hideModals();
          this.pendingCopyContext = null;
 
@@ -2868,7 +2868,7 @@ const App = {
         const status = document.getElementById('backup-status');
         if (!status) return;
 
-        status.textContent = 'Export/Import lokal';
+        status.textContent = 'Supabase Cloud';
     },
 
     exportBackup() {
@@ -2898,35 +2898,6 @@ const App = {
         } catch (e) {
             this.showToast(e?.message || 'Backup konnte nicht exportiert werden.', 'error');
         }
-    },
-
-    importBackup() {
-        const input = document.getElementById('import-file');
-        const file = input?.files?.[0];
-        if (!file) {
-            this.showToast('Bitte zuerst eine JSON-Datei auswählen.', 'error');
-            return;
-        }
-
-        if (!confirm('Import überschreibt die aktuellen Daten auf diesem Gerät. Fortfahren?')) {
-            return;
-        }
-
-        const reader = new FileReader();
-        reader.onload = () => {
-            try {
-                const text = String(reader.result || '');
-                const payload = JSON.parse(text);
-                DataManager.importBackup(payload);
-
-                this.showToast('Backup importiert. Seite wird neu geladen…', 'success');
-                setTimeout(() => window.location.reload(), 600);
-            } catch (e) {
-                this.showToast(e?.message || 'Import fehlgeschlagen (ungültige Datei).', 'error');
-            }
-        };
-        reader.onerror = () => this.showToast('Datei konnte nicht gelesen werden.', 'error');
-        reader.readAsText(file);
     },
 
     currentEditAbsence: null,
@@ -2968,7 +2939,7 @@ const App = {
         this.showModal('absence-modal');
     },
 
-    saveAbsence() {
+    async saveAbsence() {
         if (!this.currentEditAbsence) return;
         
         const startDate = document.getElementById('absence-start').value;
@@ -2994,31 +2965,37 @@ const App = {
             note: note || null
         };
         
-        if (this.currentEditAbsence.absenceId) {
-            // Update existing
-            absenceData.id = this.currentEditAbsence.absenceId;
-            DataManager.updateAbsence(absenceData);
-            this.showToast('Abwesenheit aktualisiert.', 'success');
-        } else {
-            // Create new
-            DataManager.addAbsence(absenceData);
-            this.showToast('Abwesenheit eingetragen.', 'success');
-        }
-        
-        this.hideModals();
-        this.currentEditAbsence = null;
-        this.renderEmployeesTab();
-    },
+        try {
+            if (this.currentEditAbsence.absenceId) {
+                absenceData.id = this.currentEditAbsence.absenceId;
+                await DataManager.updateAbsence(absenceData);
+                this.showToast('Abwesenheit aktualisiert.', 'success');
+            } else {
+                await DataManager.addAbsence(absenceData);
+                this.showToast('Abwesenheit eingetragen.', 'success');
+            }
 
-    deleteAbsence() {
-        if (!this.currentEditAbsence?.absenceId) return;
-        
-        if (confirm('Abwesenheit wirklich löschen?')) {
-            DataManager.deleteAbsence(this.currentEditAbsence.absenceId);
             this.hideModals();
             this.currentEditAbsence = null;
             this.renderEmployeesTab();
-            this.showToast('Abwesenheit gelöscht.', 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'Abwesenheit konnte nicht gespeichert werden.', 'error');
+        }
+    },
+
+    async deleteAbsence() {
+        if (!this.currentEditAbsence?.absenceId) return;
+        
+        if (confirm('Abwesenheit wirklich löschen?')) {
+            try {
+                await DataManager.deleteAbsence(this.currentEditAbsence.absenceId);
+                this.hideModals();
+                this.currentEditAbsence = null;
+                this.renderEmployeesTab();
+                this.showToast('Abwesenheit gelöscht.', 'success');
+            } catch (error) {
+                this.showToast(error?.message || 'Abwesenheit konnte nicht gelöscht werden.', 'error');
+            }
         }
     },
 
@@ -3092,7 +3069,7 @@ const App = {
         }
     },
 
-    saveNewEmployee() {
+    async saveNewEmployee() {
         const id = document.getElementById('new-emp-id').value.trim();
         const name = document.getElementById('new-emp-name').value.trim();
         const type = document.getElementById('new-emp-type').value;
@@ -3142,30 +3119,36 @@ const App = {
             hourlyRate: hourlyRate
         };
 
-        if (id) {
-            DataManager.updateEmployee({ id, ...employeePatch });
-            this.showToast(`${name} aktualisiert!`, 'success');
-        } else {
-            DataManager.addEmployee(employeePatch);
-            this.showToast(`${name} hinzugefügt!`, 'success');
-        }
+        try {
+            if (id) {
+                await DataManager.updateEmployee({ id, ...employeePatch });
+                this.showToast(`${name} aktualisiert!`, 'success');
+            } else {
+                await DataManager.addEmployee(employeePatch);
+                this.showToast(`${name} hinzugefügt!`, 'success');
+            }
 
-        this.hideModals();
-        this.renderEmployeesTab();
-        this.renderAdminView();
-        this.loadEmployeeDropdown();
+            this.hideModals();
+            this.renderEmployeesTab();
+            this.renderAdminView();
+        } catch (error) {
+            this.showToast(error?.message || 'Mitarbeiter konnte nicht gespeichert werden.', 'error');
+        }
     },
 
-    deleteEmployee(id) {
+    async deleteEmployee(id) {
         const emp = DataManager.getEmployee(id);
         if (!emp) return;
 
         if (confirm(`${emp.name} wirklich löschen?`)) {
-            DataManager.deleteEmployee(id);
-            this.renderEmployeesTab();
-            this.renderAdminView();
-            this.loadEmployeeDropdown();
-            this.showToast(`${emp.name} gelöscht.`, 'success');
+            try {
+                await DataManager.deleteEmployee(id);
+                this.renderEmployeesTab();
+                this.renderAdminView();
+                this.showToast(`${emp.name} gelöscht.`, 'success');
+            } catch (error) {
+                this.showToast(error?.message || 'Mitarbeiter konnte nicht gelöscht werden.', 'error');
+            }
         }
     },
 

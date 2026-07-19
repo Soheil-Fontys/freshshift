@@ -1,129 +1,98 @@
 (function () {
-    const statusEl = () => document.getElementById('cloud-login-status');
-
-    function setStatus(text) {
-        const el = statusEl();
-        if (el) el.textContent = text;
-    }
+    let client = null;
+    let authSubscription = null;
 
     function getConfig() {
-        const url = window.FRESHSHIFT_SUPABASE_URL || localStorage.getItem('freshshift_supabase_url') || '';
-        const key = window.FRESHSHIFT_SUPABASE_ANON_KEY || localStorage.getItem('freshshift_supabase_anon_key') || '';
+        const url = window.FRESHSHIFT_SUPABASE_URL || '';
+        const key = window.FRESHSHIFT_SUPABASE_PUBLISHABLE_KEY || '';
         return { url, key };
     }
 
     function ensureClient() {
+        if (client) return client;
+
         const { url, key } = getConfig();
         if (!url || !key) {
-            setStatus('Supabase nicht konfiguriert (URL/Anon Key fehlen).');
-            return null;
+            throw new Error('Supabase ist nicht konfiguriert.');
         }
-        if (!window.supabase || !window.supabase.createClient) {
-            setStatus('Supabase SDK nicht geladen.');
-            return null;
-        }
-        if (!window.__freshshiftSupabase) {
-            window.__freshshiftSupabase = window.supabase.createClient(url, key);
-        }
-        return window.__freshshiftSupabase;
-    }
-
-    async function refreshUi() {
-        const client = ensureClient();
-        const connectedEl = document.getElementById('cloud-login-connected');
-        const signoutBtn = document.getElementById('cloud-signout');
-
-        if (!client) {
-            if (connectedEl) connectedEl.style.display = 'none';
-            if (signoutBtn) signoutBtn.style.display = 'none';
-            return;
+        if (!window.supabase?.createClient) {
+            throw new Error('Supabase SDK wurde nicht geladen.');
         }
 
-        const { data } = await client.auth.getSession();
-        const email = data?.session?.user?.email;
-
-        if (email) {
-            if (connectedEl) {
-                connectedEl.style.display = 'block';
-                connectedEl.textContent = `Verbunden als ${email}`;
+        client = window.supabase.createClient(url, key, {
+            auth: {
+                persistSession: true,
+                autoRefreshToken: true,
+                detectSessionInUrl: true
             }
-            if (signoutBtn) signoutBtn.style.display = 'block';
-            setStatus('');
-        } else {
-            if (connectedEl) connectedEl.style.display = 'none';
-            if (signoutBtn) signoutBtn.style.display = 'none';
-        }
+        });
+        return client;
     }
 
-    async function sendMagicLink() {
-        const client = ensureClient();
-        if (!client) return;
+    async function init(onAuthChange) {
+        const supabaseClient = ensureClient();
+        if (authSubscription) authSubscription.unsubscribe();
 
-        const emailInput = document.getElementById('cloud-email');
-        const email = (emailInput?.value || '').trim();
-        if (!email) {
-            setStatus('Bitte Email eingeben.');
-            return;
-        }
+        const { data: sessionData, error } = await supabaseClient.auth.getSession();
+        if (error) throw error;
+        await onAuthChange?.('INITIAL_SESSION', sessionData.session);
 
-        setStatus('Sende Magic Link…');
-
-        const redirectTo = window.location.origin + window.location.pathname;
-        const { error } = await client.auth.signInWithOtp({
-            email,
-            options: { emailRedirectTo: redirectTo }
+        let skipInitialEvent = true;
+        const { data } = supabaseClient.auth.onAuthStateChange((event, session) => {
+            if (event === 'INITIAL_SESSION' && skipInitialEvent) {
+                skipInitialEvent = false;
+                return;
+            }
+            skipInitialEvent = false;
+            window.setTimeout(() => onAuthChange?.(event, session), 0);
         });
+        authSubscription = data.subscription;
+    }
 
-        if (error) {
-            setStatus(`Fehler: ${error.message}`);
-            return;
-        }
+    async function sendMagicLink(email) {
+        const normalizedEmail = String(email || '').trim().toLowerCase();
+        if (!normalizedEmail) throw new Error('Bitte eine Email-Adresse eingeben.');
 
-        setStatus('Magic Link gesendet. Öffne den Link in deiner Email.');
+        const redirectTo = `${window.location.origin}${window.location.pathname}`;
+        const { error } = await ensureClient().auth.signInWithOtp({
+            email: normalizedEmail,
+            options: {
+                emailRedirectTo: redirectTo,
+                shouldCreateUser: false
+            }
+        });
+        if (error) throw error;
     }
 
     async function signOut() {
-        const client = ensureClient();
-        if (!client) return;
-        await client.auth.signOut();
-        setStatus('Abgemeldet.');
-        await refreshUi();
+        const { error } = await ensureClient().auth.signOut();
+        if (error) throw error;
     }
 
-    function init() {
-        // Bind buttons if they exist
-        const sendBtn = document.getElementById('cloud-send-link');
-        if (sendBtn) sendBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            sendMagicLink();
-        });
-
-        const signoutBtn = document.getElementById('cloud-signout');
-        if (signoutBtn) signoutBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            signOut();
-        });
-
-        const client = ensureClient();
-        if (client) {
-            client.auth.onAuthStateChange(() => {
-                refreshUi();
-            });
-        }
-
-        refreshUi();
+    async function getSession() {
+        const { data, error } = await ensureClient().auth.getSession();
+        if (error) throw error;
+        return data.session;
     }
 
     async function getAccessToken() {
-        const client = ensureClient();
-        if (!client) return null;
-        const { data } = await client.auth.getSession();
-        return data?.session?.access_token || null;
+        const session = await getSession();
+        return session?.access_token || null;
+    }
+
+    async function invoke(functionName, body) {
+        const { data, error } = await ensureClient().functions.invoke(functionName, { body });
+        if (error) throw error;
+        return data;
     }
 
     window.FreshShiftSupabase = {
         init,
         ensureClient,
-        getAccessToken
+        sendMagicLink,
+        signOut,
+        getSession,
+        getAccessToken,
+        invoke
     };
 })();
