@@ -1165,15 +1165,15 @@
 
     <!-- Supabase JS (for Magic Link auth) -->
     <script>
-      // Paste your Supabase credentials here (anon key is public)
+      // The publishable key is intentionally public; authorization is enforced by RLS.
       window.FRESHSHIFT_SUPABASE_URL =
         window.FRESHSHIFT_SUPABASE_URL ||
-        "https://jxmupvccizgooxjbhfzt.supabase.co";
-      window.FRESHSHIFT_SUPABASE_ANON_KEY =
-        window.FRESHSHIFT_SUPABASE_ANON_KEY ||
-        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp4bXVwdmNjaXpnb294amJoZnp0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg0MjIzODksImV4cCI6MjA4Mzk5ODM4OX0.VsdgAuJKct3MLnw7zKfsWvujlUJ_578rQ74GYMlkp_c";
+        "https://inyfwjckmwxadjczxttr.supabase.co";
+      window.FRESHSHIFT_SUPABASE_PUBLISHABLE_KEY =
+        window.FRESHSHIFT_SUPABASE_PUBLISHABLE_KEY ||
+        "sb_publishable_oIlen9vQLozQghcqGJTMjQ_W03bXXqX";
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.7"></script>
     <script src="js/supabase.js"></script>
 
     <script src="js/data.js"></script>

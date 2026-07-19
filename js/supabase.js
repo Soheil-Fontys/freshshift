@@ -8,14 +8,18 @@
 
     function getConfig() {
         const url = window.FRESHSHIFT_SUPABASE_URL || localStorage.getItem('freshshift_supabase_url') || '';
-        const key = window.FRESHSHIFT_SUPABASE_ANON_KEY || localStorage.getItem('freshshift_supabase_anon_key') || '';
+        const key = window.FRESHSHIFT_SUPABASE_PUBLISHABLE_KEY
+            || window.FRESHSHIFT_SUPABASE_ANON_KEY
+            || localStorage.getItem('freshshift_supabase_publishable_key')
+            || localStorage.getItem('freshshift_supabase_anon_key')
+            || '';
         return { url, key };
     }
 
     function ensureClient() {
         const { url, key } = getConfig();
         if (!url || !key) {
-            setStatus('Supabase nicht konfiguriert (URL/Anon Key fehlen).');
+            setStatus('Supabase nicht konfiguriert (URL/Publishable Key fehlen).');
             return null;
         }
         if (!window.supabase || !window.supabase.createClient) {
