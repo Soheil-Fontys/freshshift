@@ -8,12 +8,14 @@ const root = path.resolve(__dirname, '..');
 
 test('login screen only exposes invited-email authentication', () => {
     const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+    const serviceWorker = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
 
     assert.match(html, /id="auth-email"/);
     assert.match(html, /id="auth-send-link"/);
     assert.match(html, /js\/cloud-data\.js/);
     assert.doesNotMatch(html, /id="admin-password"/);
     assert.doesNotMatch(html, /id="employee-select"/);
+    assert.match(serviceWorker, /freshshift-v10/);
 });
 
 test('ISO week keys use the ISO week-year at New Year', () => {
