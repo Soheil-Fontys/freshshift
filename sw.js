@@ -3,7 +3,7 @@
  * Enables offline functionality and caching
  */
 
-const CACHE_NAME = 'freshshift-v10';
+const CACHE_NAME = 'freshshift-v11';
 const STATIC_ASSETS = [
     './',
     './index.html',

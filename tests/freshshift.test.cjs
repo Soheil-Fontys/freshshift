@@ -13,9 +13,14 @@ test('login screen only exposes invited-email authentication', () => {
     assert.match(html, /id="auth-email"/);
     assert.match(html, /id="auth-send-link"/);
     assert.match(html, /js\/cloud-data\.js/);
+    assert.match(html, /id="team-schedule-content"/);
+    assert.match(html, /id="admin-activity-list"/);
+    assert.match(html, /<button\s+type="button"\s+id="notification-badge"/);
     assert.doesNotMatch(html, /id="admin-password"/);
     assert.doesNotMatch(html, /id="employee-select"/);
-    assert.match(serviceWorker, /freshshift-v10/);
+    assert.match(html, /id="loading-screen" class="screen active"/);
+    assert.doesNotMatch(html, /id="login-screen" class="screen active"/);
+    assert.match(serviceWorker, /freshshift-v11/);
 });
 
 test('ISO week keys use the ISO week-year at New Year', () => {
@@ -132,7 +137,8 @@ test('cloud adapter maps RLS-filtered relational data into the existing UI model
             week_key: '2026-W30',
             released: true,
             released_at: '2026-07-20T10:00:00Z',
-            saved_at: '2026-07-19T10:00:00Z'
+            saved_at: '2026-07-19T10:00:00Z',
+            version: 3
         }, {
             id: respondedDraftScheduleId,
             store_id: 'fresh_fries',
@@ -175,7 +181,22 @@ test('cloud adapter maps RLS-filtered relational data into the existing UI model
             response_reason: null
         }],
         absences: [],
-        notifications: []
+        notifications: [],
+        notification_reads: [],
+        activity_log: [],
+        team_shifts: [{
+            id: '88888888-8888-4888-8888-888888888888',
+            schedule_id: scheduleId,
+            store_id: 'fresh_fries',
+            week_key: '2026-W30',
+            day_key: 'monday',
+            employee_id: '99999999-9999-4999-8999-999999999999',
+            employee_name: 'Team Kollegin',
+            start: '12:00',
+            end: '20:00',
+            deviation_json: { lateMinutes: 10 },
+            request_status: 'none'
+        }]
     };
 
     class Query {
@@ -185,6 +206,7 @@ test('cloud adapter maps RLS-filtered relational data into the existing UI model
         select() { return this; }
         eq() { return this; }
         order() { return this; }
+        limit() { return this; }
         maybeSingle() { return Promise.resolve({ data: rows[this.table], error: null }); }
         then(resolve, reject) {
             return Promise.resolve({ data: rows[this.table], error: null }).then(resolve, reject);
@@ -193,7 +215,8 @@ test('cloud adapter maps RLS-filtered relational data into the existing UI model
 
     const supabase = {
         auth: { getUser: async () => ({ data: { user: { id: userId } }, error: null }) },
-        from: table => new Query(table)
+        from: table => new Query(table),
+        rpc: async name => ({ data: name === 'get_released_team_shifts' ? rows.team_shifts : null, error: null })
     };
     const context = vm.createContext({
         console,
@@ -213,6 +236,9 @@ test('cloud adapter maps RLS-filtered relational data into the existing UI model
     assert.equal(vm.runInContext('DataManager.getEmployee("55555555-5555-4555-8555-555555555555").active', context), false);
     assert.equal(vm.runInContext("DataManager.getScheduleForWeek('2026-W30', 'fresh_fries').shifts.monday[0].start", context), '10:00');
     assert.equal(vm.runInContext("DataManager.getScheduleForWeek('2026-W30', 'fresh_fries').shifts.monday[0].employeeName", context), 'Test Employee');
+    assert.equal(vm.runInContext("DataManager.getScheduleForWeek('2026-W30', 'fresh_fries').version", context), 3);
+    assert.equal(vm.runInContext("DataManager.getScheduleForWeek('2026-W30', 'fresh_fries').shifts.monday[1].employeeName", context), 'Team Kollegin');
+    assert.equal(vm.runInContext("DataManager.getScheduleForWeek('2026-W30', 'fresh_fries').shifts.monday[1].actualStart", context), undefined);
     assert.equal(vm.runInContext("DataManager.getScheduleForWeek('2026-W31', 'fresh_fries').shifts.tuesday[0].requestStatus", context), 'accepted');
 });
 
@@ -292,6 +318,14 @@ test('production hardening preserves history and separates save from release', (
         path.join(root, 'supabase/migrations/20260719231926_allow_employee_shift_request_responses.sql'),
         'utf8'
     );
+    const collaborationMigration = fs.readFileSync(
+        path.join(root, 'supabase/migrations/20260720123000_multi_admin_team_schedule_and_eau.sql'),
+        'utf8'
+    );
+    const concurrencyMigration = fs.readFileSync(
+        path.join(root, 'supabase/migrations/20260720131500_close_concurrency_edges.sql'),
+        'utf8'
+    );
 
     assert.match(migration, /create or replace function public\.archive_employee/);
     assert.match(migration, /create or replace function public\.restore_employee/);
@@ -300,4 +334,11 @@ test('production hardening preserves history and separates save from release', (
     assert.match(edgeFunction, /invite-employee email rollback failed/);
     assert.match(edgeFunction, /\.eq\("active", true\)/);
     assert.match(shiftResponseMigration, /request_status in \('pending', 'accepted', 'declined'\)/);
+    assert.match(collaborationMigration, /create or replace function public\.save_schedule_versioned/);
+    assert.match(collaborationMigration, /create or replace function public\.get_released_team_shifts/);
+    assert.match(collaborationMigration, /create table if not exists public\.notification_reads/);
+    assert.match(collaborationMigration, /delete from public\.schedule_shifts/);
+    assert.match(collaborationMigration, /au_status in \('not_required', 'pending', 'verified'\)/);
+    assert.match(concurrencyMigration, /bump_schedule_version_for_employee_update/);
+    assert.match(concurrencyMigration, /new\.end_date - new\.start_date/);
 });

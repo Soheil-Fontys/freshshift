@@ -49,13 +49,13 @@ const App = {
         this.updateWeekDisplay();
         this.updateMonthDisplay();
         this.updateAvailWeekDisplay();
-        this.showScreen('login-screen');
-        this.setAuthStatus('Sitzung wird geprüft…');
+        this.showScreen('loading-screen');
 
         try {
             await window.FreshShiftSupabase.init((event, session) => this.handleAuthStateChange(event, session));
             this.startBackgroundRefresh();
         } catch (error) {
+            this.showScreen('login-screen');
             this.setAuthStatus(error?.message || 'Cloud-Verbindung fehlgeschlagen.', true);
         }
     },
@@ -945,6 +945,13 @@ const App = {
 
             const statusPill = `<span class="absence-pill ${status}">${statusLabel}</span>`;
             const reason = a.responseReason ? `<div class="absence-note">Grund: ${this.escapeHtml(a.responseReason)}</div>` : '';
+            const auStatus = a.type === 'krank'
+                ? a.auStatus === 'verified'
+                    ? '<span class="au-pill verified">eAU bestätigt</span>'
+                    : a.auStatus === 'pending'
+                        ? '<span class="au-pill pending">eAU-Prüfung ausstehend</span>'
+                        : '<span class="au-pill not-required">Aktuell keine eAU erforderlich</span>'
+                : '';
 
             return `
                 <div class="absence-item ${status === 'pending' ? 'absence-active' : ''}">
@@ -954,6 +961,7 @@ const App = {
                         <div class="absence-dates">${dateText}</div>
                         ${a.note ? `<div class="absence-note">${this.escapeHtml(a.note)}</div>` : ''}
                         ${reason}
+                        ${auStatus}
                     </div>
                 </div>
             `;
@@ -1329,6 +1337,44 @@ const App = {
         
         // Render notifications
         this.updateAdminNotifications();
+
+        // Render shared multi-admin history
+        this.renderAdminActivity();
+    },
+
+    renderAdminActivity() {
+        const container = document.getElementById('admin-activity-list');
+        if (!container) return;
+
+        const activity = DataManager.getActivity?.() || [];
+        if (activity.length === 0) {
+            container.innerHTML = '<div class="empty-state small">Noch keine gemeinsamen Änderungen</div>';
+            return;
+        }
+
+        const labels = {
+            schedule_saved: ['💾', 'hat einen Wochenplan gespeichert'],
+            schedule_released: ['✅', 'hat einen Wochenplan freigegeben'],
+            shift_response: ['↔️', 'hat auf eine Schichtanfrage geantwortet'],
+            absence_approved: ['📅', 'hat eine Abwesenheit bestätigt'],
+            absence_schedule_cleanup: ['🧹', 'Schichten wurden wegen Abwesenheit entfernt'],
+            au_status_changed: ['🩺', 'hat den eAU-Status geändert']
+        };
+
+        container.innerHTML = activity.slice(0, 12).map(item => {
+            const [icon, label] = labels[item.action] || ['•', 'hat Daten geändert'];
+            const store = item.storeId ? ` · ${this.escapeHtml(DataManager.getStoreName(item.storeId))}` : '';
+            const week = item.weekKey ? ` · ${this.escapeHtml(item.weekKey.replace('-W', ' KW '))}` : '';
+            return `
+                <div class="activity-item">
+                    <span class="activity-icon">${icon}</span>
+                    <div>
+                        <div class="activity-title"><strong>${this.escapeHtml(item.actorName)}</strong> ${label}</div>
+                        <div class="activity-meta">${this.formatTimestamp(item.timestamp)}${store}${week}</div>
+                    </div>
+                </div>
+            `;
+        }).join('');
     },
 
     renderAdminWeekOverview(schedule) {
@@ -1391,12 +1437,19 @@ const App = {
             const dateText = absence.startDate === absence.endDate
                 ? DateUtils.formatDate(startDate)
                 : `${DateUtils.formatDate(startDate)} – ${DateUtils.formatDate(endDate)}`;
+
+            const auBadge = absence.type === 'krank' && absence.auStatus === 'pending'
+                ? '<span class="au-pill pending">eAU offen</span>'
+                : absence.type === 'krank' && absence.auStatus === 'verified'
+                    ? '<span class="au-pill verified">eAU bestätigt</span>'
+                    : '';
             
             return `
                 <div class="admin-absence-item ${isActive ? 'active' : ''}">
                     <span class="absence-icon">${typeIcon}</span>
                     <span class="absence-employee">${this.escapeHtml(employee?.name || 'Unbekannt')}</span>
                     <span class="absence-date">${dateText}</span>
+                    ${auBadge}
                     ${isActive ? '<span class="absence-now">Jetzt</span>' : ''}
                 </div>
             `;
@@ -1544,7 +1597,7 @@ const App = {
         const list = document.getElementById('notifications-list');
         
         if (notifications.length > 0) {
-            badge.style.display = 'block';
+            badge.style.display = 'inline-flex';
             count.textContent = notifications.length;
             card.style.display = 'block';
             
@@ -1559,7 +1612,7 @@ const App = {
                 const titleName = n.employeeName ? `${this.escapeHtml(n.employeeName)}: ` : '';
 
                 const needsAbsenceActions = n.type === 'absence_request' && n.absenceId;
-                const actions = needsAbsenceActions ? (() => {
+                let actions = needsAbsenceActions ? (() => {
                     const payload = this.encodeActionData(JSON.stringify({ notificationId: n.id, absenceId: n.absenceId }));
                     return `
                         <div class="request-actions" style="margin-top: 8px; flex-direction: row;">
@@ -1568,6 +1621,22 @@ const App = {
                         </div>
                     `;
                 })() : '';
+
+                if (!actions && n.weekKey) {
+                    const context = this.encodeActionData(JSON.stringify({ notificationId: n.id, weekKey: n.weekKey }));
+                    actions = `
+                        <div class="request-actions" style="margin-top: 8px; flex-direction: row;">
+                            <button class="btn btn-primary btn-small" onclick="App.openNotificationPlan('${context}')">Im Plan öffnen</button>
+                        </div>
+                    `;
+                } else if (!actions && n.type === 'absence_notice') {
+                    const context = this.encodeActionData(JSON.stringify({ notificationId: n.id }));
+                    actions = `
+                        <div class="request-actions" style="margin-top: 8px; flex-direction: row;">
+                            <button class="btn btn-primary btn-small" onclick="App.openNotificationAbsences('${context}')">Abwesenheit prüfen</button>
+                        </div>
+                    `;
+                }
 
                 return `
                     <div class="notification-item ${['early', 'late', 'shift_request_response', 'absence_request', 'absence_notice'].includes(n.type) ? n.type : 'info'}">
@@ -1940,7 +2009,37 @@ const App = {
 
     toggleNotifications() {
         const card = document.getElementById('notifications-card');
-        card.style.display = card.style.display === 'none' ? 'block' : 'none';
+        this.navigateAdminTo('admin-dashboard');
+        this.updateAdminNotifications();
+        card.style.display = 'block';
+        window.setTimeout(() => card.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+    },
+
+    async openNotificationPlan(payload) {
+        try {
+            const { notificationId, weekKey } = JSON.parse(decodeURIComponent(payload));
+            if (notificationId) await DataManager.markNotificationRead(notificationId);
+            const [year, week] = String(weekKey || '').split('-W').map(Number);
+            if (Number.isInteger(year) && Number.isInteger(week)) {
+                this.currentWeek = DataManager.getDateFromWeek(year, week);
+            }
+            this.navigateAdminTo('admin-planner');
+            this.updateAdminNotifications();
+        } catch (error) {
+            this.showToast(error?.message || 'Meldung konnte nicht geöffnet werden.', 'error');
+        }
+    },
+
+    async openNotificationAbsences(payload) {
+        try {
+            const { notificationId } = JSON.parse(decodeURIComponent(payload));
+            if (notificationId) await DataManager.markNotificationRead(notificationId);
+            this.navigateAdminTo('admin-employees');
+            this.updateAdminNotifications();
+            window.setTimeout(() => document.querySelector('.absences-overview-card')?.scrollIntoView({ behavior: 'smooth' }), 0);
+        } catch (error) {
+            this.showToast(error?.message || 'Meldung konnte nicht geöffnet werden.', 'error');
+        }
     },
 
     async clearNotifications() {
@@ -2102,6 +2201,7 @@ const App = {
             `;
             contentContainer.innerHTML = '';
             summaryContainer.innerHTML = '';
+            this.renderTeamSchedule(null, dates);
             return;
         }
 
@@ -2195,6 +2295,55 @@ const App = {
                 </div>
             </div>
         `;
+
+        this.renderTeamSchedule(schedule, dates);
+    },
+
+    renderTeamSchedule(schedule, dates) {
+        const container = document.getElementById('team-schedule-content');
+        const section = document.getElementById('team-schedule-section');
+        if (!container || !section) return;
+
+        if (!schedule?.released) {
+            section.style.display = 'none';
+            container.innerHTML = '';
+            return;
+        }
+
+        section.style.display = 'block';
+        container.innerHTML = DateUtils.DAY_KEYS.map((dayKey, index) => {
+            const shifts = (schedule.shifts?.[dayKey] || [])
+                .filter(shift => !['pending', 'declined'].includes(shift.requestStatus))
+                .sort((a, b) => String(a.start).localeCompare(String(b.start)) ||
+                    String(a.employeeName || '').localeCompare(String(b.employeeName || ''), 'de'));
+
+            const rows = shifts.length > 0 ? shifts.map(shift => {
+                const isCurrentUser = shift.employeeId === this.currentUser?.id;
+                const name = shift.employeeName || this.getEmployeeName(shift.employeeId);
+                const deviation = shift.deviation?.lateMinutes
+                    ? `<div class="team-deviation">Kommt voraussichtlich ${this.escapeHtml(shift.deviation.lateMinutes)} Min. später</div>`
+                    : shift.deviation?.earlyMinutes
+                        ? `<div class="team-deviation">Geht voraussichtlich ${this.escapeHtml(shift.deviation.earlyMinutes)} Min. früher</div>`
+                        : '';
+                return `
+                    <div class="team-shift-row">
+                        <div class="team-shift-name">${this.escapeHtml(name)}${isCurrentUser ? ' <span class="absence-pill approved">Du</span>' : ''}</div>
+                        <div class="team-shift-time">${this.escapeHtml(shift.start)} – ${this.escapeHtml(shift.end)}</div>
+                        ${deviation}
+                    </div>
+                `;
+            }).join('') : '<div class="empty-state small">Niemand eingeplant</div>';
+
+            return `
+                <div class="team-day">
+                    <div class="team-day-header">
+                        <span>${DateUtils.DAYS[index]}</span>
+                        <span>${DateUtils.formatDate(dates[index])}</span>
+                    </div>
+                    ${rows}
+                </div>
+            `;
+        }).join('');
     },
 
     // ===========================
@@ -3100,6 +3249,29 @@ const App = {
                 ? '<span class="absence-pill pending">Wartet</span>'
                 : '<span class="absence-pill approved">Bestätigt</span>';
 
+            let auControls = '';
+            if (absence.type === 'krank') {
+                const payload = this.encodeActionData(JSON.stringify({ absenceId: absence.id }));
+                if (absence.auStatus === 'pending') {
+                    auControls = `
+                        <span class="au-pill pending">eAU-Prüfung offen</span>
+                        <div class="au-actions">
+                            <button class="btn btn-success btn-small" onclick="event.stopPropagation(); App.setAbsenceAuStatus('${payload}', 'verified')">eAU bestätigen</button>
+                            <button class="btn btn-secondary btn-small" onclick="event.stopPropagation(); App.setAbsenceAuStatus('${payload}', 'not_required')">Nicht erforderlich</button>
+                        </div>
+                    `;
+                } else if (absence.auStatus === 'verified') {
+                    auControls = '<span class="au-pill verified">eAU bestätigt</span>';
+                } else {
+                    auControls = `
+                        <span class="au-pill not-required">Keine eAU angefordert</span>
+                        <div class="au-actions">
+                            <button class="btn btn-secondary btn-small" onclick="event.stopPropagation(); App.setAbsenceAuStatus('${payload}', 'pending')">eAU anfordern</button>
+                        </div>
+                    `;
+                }
+            }
+
             return `
                 <div class="absence-item ${isActive ? 'absence-active' : ''}" onclick="App.editAbsence('${absence.id}')">
                     <span class="absence-icon">${typeIcon}</span>
@@ -3108,11 +3280,27 @@ const App = {
                         <div class="absence-dates">${typeLabel}: ${dateText}</div>
                         ${absence.note ? `<div class="absence-note">${this.escapeHtml(absence.note)}</div>` : ''}
                         ${absence.responseReason ? `<div class="absence-note">Grund: ${this.escapeHtml(absence.responseReason)}</div>` : ''}
+                        ${auControls}
                     </div>
                     ${isActive ? '<span class="absence-status">Aktuell</span>' : ''}
                 </div>
             `;
         }).join('');
+    },
+
+    async setAbsenceAuStatus(payload, status) {
+        try {
+            const { absenceId } = JSON.parse(decodeURIComponent(payload));
+            await DataManager.setAbsenceAuStatus(absenceId, status);
+            this.renderEmployeesTab();
+            this.renderAdminDashboard();
+            const label = status === 'verified' ? 'eAU bestätigt.'
+                : status === 'pending' ? 'eAU-Prüfung angefordert.'
+                    : 'eAU als nicht erforderlich markiert.';
+            this.showToast(label, 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'eAU-Status konnte nicht geändert werden.', 'error');
+        }
     },
 
     // ===========================
