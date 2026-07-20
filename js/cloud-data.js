@@ -13,7 +13,8 @@
         availabilities: [],
         schedules: [],
         absences: [],
-        notifications: []
+        notifications: [],
+        activity: []
     });
 
     let cache = emptyCache();
@@ -82,7 +83,7 @@
             weekKey: row.week_key,
             dayKey: row.day_key,
             employeeId: row.employee_id,
-            employeeName: employees.find(employee => employee.id === row.employee_id)?.name || null,
+            employeeName: row.employee_name || employees.find(employee => employee.id === row.employee_id)?.name || null,
             start: row.start,
             end: row.end,
             actualStart: row.actual_start,
@@ -106,6 +107,7 @@
                 released: row.released,
                 releasedAt: row.released_at,
                 savedAt: row.saved_at,
+                version: Number(row.version || 1),
                 shifts: {}
             });
         });
@@ -120,6 +122,7 @@
                     released: false,
                     releasedAt: null,
                     savedAt: null,
+                    version: 1,
                     shifts: {}
                 };
                 byId.set(row.schedule_id, schedule);
@@ -149,11 +152,17 @@
             requestedAt: row.requested_at,
             respondedAt: row.responded_at,
             responseReason: row.response_reason,
+            auRequired: Boolean(row.au_required),
+            auStatus: row.au_status || 'not_required',
+            auVerifiedAt: row.au_verified_at || null,
+            auVerifiedBy: row.au_verified_by || null,
             createdAt: row.created_at
         };
     }
 
-    function mapNotification(row) {
+    function mapNotification(row, adminReadIds = new Set()) {
+        const adminReadAt = adminReadIds.get?.(row.id) || null;
+        const effectiveReadAt = role === 'admin' ? adminReadAt : row.read_at;
         return {
             ...(row.payload || {}),
             id: row.id,
@@ -162,8 +171,20 @@
             targetEmployeeId: row.target_employee_id,
             type: row.type,
             timestamp: row.created_at,
-            read: Boolean(row.read_at),
-            readAt: row.read_at
+            read: Boolean(effectiveReadAt),
+            readAt: effectiveReadAt
+        };
+    }
+
+    function mapActivity(row) {
+        return {
+            id: row.id,
+            actorName: row.actor_name,
+            storeId: row.store_id,
+            weekKey: row.week_key,
+            action: row.action,
+            details: row.details || {},
+            timestamp: row.created_at
         };
     }
 
@@ -236,22 +257,30 @@
             supabase.from('schedules').select('*'),
             supabase.from('schedule_shifts').select('*'),
             supabase.from('absences').select('*'),
-            supabase.from('notifications').select('*').order('created_at', { ascending: false })
+            supabase.from('notifications').select('*').order('created_at', { ascending: false }),
+            role === 'employee' ? supabase.rpc('get_released_team_shifts') : Promise.resolve({ data: [], error: null }),
+            supabase.from('notification_reads').select('notification_id,read_at').eq('profile_id', user.id),
+            supabase.from('activity_log').select('*').order('created_at', { ascending: false }).limit(50)
         ]);
 
-        const [stores, employees, employeeStores, availabilities, schedules, shifts, absences, notifications] =
+        const [stores, employees, employeeStores, availabilities, schedules, shifts, absences, notifications, teamShifts, notificationReads, activity] =
             results.map((result, index) => unwrap(result, `Cloud-Daten konnten nicht geladen werden (${index + 1}).`) || []);
 
         const mappedEmployees = employees.map(row => mapEmployee(row, employeeStores));
+        const allShiftRows = Array.from(new Map(
+            [...shifts, ...teamShifts].map(shift => [shift.id, shift])
+        ).values());
+        const adminReadIds = new Map(notificationReads.map(item => [item.notification_id, item.read_at]));
 
         cache = {
             stores,
             employees: mappedEmployees,
             employeeStores,
             availabilities: availabilities.map(mapAvailability),
-            schedules: mapSchedules(schedules, shifts, mappedEmployees),
+            schedules: mapSchedules(schedules, allShiftRows, mappedEmployees),
             absences: absences.map(mapAbsence),
-            notifications: notifications.map(mapNotification)
+            notifications: notifications.map(row => mapNotification(row, adminReadIds)),
+            activity: activity.map(mapActivity)
         };
 
         currentEmployee = cache.employees.find(employee => employee.profileId === user.id && employee.active) || null;
@@ -415,14 +444,14 @@
             requireAdmin();
             const supabase = requireClient();
             const row = scheduleRow(schedule);
-            const scheduleId = unwrap(await supabase.rpc('save_schedule', {
+            const savedRef = unwrap(await supabase.rpc('save_schedule_versioned', {
                 p_store_id: row.store_id,
                 p_week_key: row.week_key,
-                p_released: row.released,
-                p_released_at: row.released_at,
                 p_saved_at: row.saved_at,
-                p_shifts: flattenShiftRows(schedule)
+                p_shifts: flattenShiftRows(schedule),
+                p_expected_version: schedule.id ? schedule.version : null
             }), 'Schichtplan konnte nicht gespeichert werden.');
+            const scheduleId = savedRef?.id;
 
             const [scheduleResult, shiftsResult] = await Promise.all([
                 supabase.from('schedules').select('*').eq('id', scheduleId).single(),
@@ -439,16 +468,21 @@
         async releaseSchedule(weekKey, storeId) {
             requireAdmin();
             const supabase = requireClient();
-            const scheduleId = unwrap(await supabase.rpc('release_schedule', {
+            const existing = cache.schedules.find(schedule =>
+                schedule.weekKey === weekKey && schedule.storeId === this.normalizeStoreId(storeId));
+            const savedRef = unwrap(await supabase.rpc('release_schedule_versioned', {
                 p_week_key: weekKey,
-                p_store_id: this.normalizeStoreId(storeId)
+                p_store_id: this.normalizeStoreId(storeId),
+                p_expected_version: existing?.version ?? null
             }), 'Schichtplan konnte nicht freigegeben werden.');
+            const scheduleId = savedRef?.id;
             const row = unwrap(await supabase.from('schedules').select('*').eq('id', scheduleId).single(), 'Schichtplan konnte nicht neu geladen werden.');
 
-            const existing = cache.schedules.find(schedule => schedule.id === row.id);
             if (existing) {
                 existing.released = true;
                 existing.releasedAt = row.released_at;
+                existing.savedAt = row.saved_at;
+                existing.version = Number(row.version || existing.version || 1);
             }
             return existing || null;
         },
@@ -513,9 +547,8 @@
                 })
                 .select()
                 .single(), 'Abwesenheit konnte nicht gespeichert werden.');
-            const mapped = mapAbsence(saved);
-            cache.absences.push(mapped);
-            return mapped;
+            await loadCloudData();
+            return cache.absences.find(item => item.id === saved.id) || mapAbsence(saved);
         },
 
         async updateAbsence(absence) {
@@ -537,9 +570,18 @@
                 .eq('id', absence.id)
                 .select()
                 .single(), 'Abwesenheit konnte nicht aktualisiert werden.');
-            const mapped = mapAbsence(saved);
-            replaceById(cache.absences, mapped);
-            return mapped;
+            await loadCloudData();
+            return cache.absences.find(item => item.id === saved.id) || mapAbsence(saved);
+        },
+
+        async setAbsenceAuStatus(id, status) {
+            requireAdmin();
+            unwrap(await requireClient().rpc('set_absence_au_status', {
+                p_absence_id: id,
+                p_status: status
+            }), 'eAU-Status konnte nicht aktualisiert werden.');
+            await loadCloudData();
+            return cache.absences.find(item => item.id === id) || null;
         },
 
         async deleteAbsence(id) {
@@ -550,6 +592,10 @@
 
         getNotifications() {
             return cache.notifications;
+        },
+
+        getActivity() {
+            return cache.activity;
         },
 
         async addNotification(notification) {
@@ -581,7 +627,15 @@
 
         async markNotificationRead(id) {
             const readAt = new Date().toISOString();
-            unwrap(await requireClient().from('notifications').update({ read_at: readAt }).eq('id', id), 'Meldung konnte nicht aktualisiert werden.');
+            if (role === 'admin') {
+                unwrap(await requireClient().from('notification_reads').upsert({
+                    notification_id: id,
+                    profile_id: authUser.id,
+                    read_at: readAt
+                }, { onConflict: 'notification_id,profile_id' }), 'Meldung konnte nicht aktualisiert werden.');
+            } else {
+                unwrap(await requireClient().from('notifications').update({ read_at: readAt }).eq('id', id), 'Meldung konnte nicht aktualisiert werden.');
+            }
             const notification = cache.notifications.find(item => item.id === id);
             if (notification) {
                 notification.read = true;
@@ -591,8 +645,23 @@
 
         async markNotificationsRead() {
             const readAt = new Date().toISOString();
-            unwrap(await requireClient().from('notifications').update({ read_at: readAt }).is('read_at', null), 'Meldungen konnten nicht aktualisiert werden.');
-            cache.notifications.forEach(notification => {
+            const visible = cache.notifications.filter(notification =>
+                role !== 'admin' || notification.target !== 'employee');
+            if (role === 'admin') {
+                const rows = visible.filter(item => !item.read).map(item => ({
+                    notification_id: item.id,
+                    profile_id: authUser.id,
+                    read_at: readAt
+                }));
+                if (rows.length > 0) {
+                    unwrap(await requireClient().from('notification_reads').upsert(rows, {
+                        onConflict: 'notification_id,profile_id'
+                    }), 'Meldungen konnten nicht aktualisiert werden.');
+                }
+            } else {
+                unwrap(await requireClient().from('notifications').update({ read_at: readAt }).is('read_at', null), 'Meldungen konnten nicht aktualisiert werden.');
+            }
+            visible.forEach(notification => {
                 notification.read = true;
                 notification.readAt = readAt;
             });
