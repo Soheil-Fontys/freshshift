@@ -95,7 +95,7 @@
             <div class="login-icon">🔐</div>
             <p class="login-hint">
               Melde dich mit deiner eingeladenen Email-Adresse an. Du erhältst
-              einen sicheren Anmeldelink ohne Passwort.
+              einen sicheren Anmeldecode ohne Passwort.
             </p>
 
             <div class="form-group">
@@ -110,8 +110,25 @@
             </div>
 
             <button type="button" id="auth-send-link" class="btn btn-primary btn-large btn-full">
-              Anmeldelink senden
+              Anmeldecode senden
             </button>
+            <div id="auth-code-group" class="auth-code-group" hidden>
+              <div class="form-group">
+                <label for="auth-code">6-stelliger Code aus der Email</label>
+                <input
+                  type="text"
+                  id="auth-code"
+                  inputmode="numeric"
+                  autocomplete="one-time-code"
+                  maxlength="6"
+                  pattern="[0-9]{6}"
+                  placeholder="123456"
+                />
+              </div>
+              <button type="button" id="auth-verify-code" class="btn btn-success btn-large btn-full">
+                Mit Code anmelden
+              </button>
+            </div>
             <button
               type="button"
               id="auth-signout"
