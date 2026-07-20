@@ -172,13 +172,33 @@ const App = {
         const email = document.getElementById('auth-email')?.value || '';
         const button = document.getElementById('auth-send-link');
         if (button) button.disabled = true;
-        this.setAuthStatus('Anmeldelink wird gesendet…');
+        this.setAuthStatus('Anmeldecode wird gesendet…');
 
         try {
             await window.FreshShiftSupabase.sendMagicLink(email);
-            this.setAuthStatus('Anmeldelink gesendet. Bitte öffne deine Email.');
+            const codeGroup = document.getElementById('auth-code-group');
+            if (codeGroup) codeGroup.hidden = false;
+            document.getElementById('auth-code')?.focus();
+            this.setAuthStatus('Code gesendet. Öffne die Email und gib den 6-stelligen Code hier ein.');
         } catch (error) {
-            this.setAuthStatus(error?.message || 'Anmeldelink konnte nicht gesendet werden.', true);
+            this.setAuthStatus(error?.message || 'Anmeldecode konnte nicht gesendet werden.', true);
+        } finally {
+            if (button) button.disabled = false;
+        }
+    },
+
+    async verifyAuthCode() {
+        const email = document.getElementById('auth-email')?.value || '';
+        const token = document.getElementById('auth-code')?.value || '';
+        const button = document.getElementById('auth-verify-code');
+        if (button) button.disabled = true;
+        this.setAuthStatus('Code wird geprüft…');
+
+        try {
+            await window.FreshShiftSupabase.verifyEmailCode(email, token);
+            this.setAuthStatus('Angemeldet. Daten werden geladen…');
+        } catch (error) {
+            this.setAuthStatus(error?.message || 'Code ist ungültig oder abgelaufen.', true);
         } finally {
             if (button) button.disabled = false;
         }
@@ -192,6 +212,13 @@ const App = {
         document.getElementById('auth-send-link').addEventListener('click', () => this.sendAuthLink());
         document.getElementById('auth-email').addEventListener('keypress', (event) => {
             if (event.key === 'Enter') this.sendAuthLink();
+        });
+        document.getElementById('auth-verify-code').addEventListener('click', () => this.verifyAuthCode());
+        document.getElementById('auth-code').addEventListener('input', event => {
+            event.target.value = event.target.value.replace(/\D/g, '').slice(0, 6);
+        });
+        document.getElementById('auth-code').addEventListener('keypress', event => {
+            if (event.key === 'Enter') this.verifyAuthCode();
         });
         document.getElementById('auth-signout').addEventListener('click', () => this.logout());
 
@@ -941,7 +968,9 @@ const App = {
                 : `${DateUtils.formatDate(startDate)} – ${DateUtils.formatDate(endDate)}`;
 
             const status = a.status || 'approved';
-            const statusLabel = status === 'pending' ? 'Wartet' : status === 'declined' ? 'Abgelehnt' : 'Bestätigt';
+            const statusLabel = status === 'pending' ? 'Wartet'
+                : status === 'declined' ? 'Abgelehnt'
+                    : status === 'cancelled' ? 'Storniert' : 'Bestätigt';
 
             const statusPill = `<span class="absence-pill ${status}">${statusLabel}</span>`;
             const reason = a.responseReason ? `<div class="absence-note">Grund: ${this.escapeHtml(a.responseReason)}</div>` : '';
@@ -953,6 +982,9 @@ const App = {
                         : '<span class="au-pill not-required">Aktuell keine eAU erforderlich</span>'
                 : '';
 
+            const canCancel = ['pending', 'approved'].includes(status)
+                && String(a.endDate) >= DateUtils.formatDateKey(new Date());
+
             return `
                 <div class="absence-item ${status === 'pending' ? 'absence-active' : ''}">
                     <span class="absence-icon">${typeIcon}</span>
@@ -962,10 +994,33 @@ const App = {
                         ${a.note ? `<div class="absence-note">${this.escapeHtml(a.note)}</div>` : ''}
                         ${reason}
                         ${auStatus}
+                        ${canCancel ? `
+                            <div class="absence-actions">
+                                <button class="btn btn-danger btn-small" onclick="App.cancelOwnAbsence('${a.id}')">Abwesenheit stornieren</button>
+                            </div>
+                        ` : ''}
                     </div>
                 </div>
             `;
         }).join('');
+    },
+
+    async cancelOwnAbsence(absenceId) {
+        const absence = DataManager.getAbsence(absenceId);
+        if (!absence) return;
+        const warning = absence.status === 'approved'
+            ? '\n\nBereits entfernte Schichten werden nicht automatisch wiederhergestellt. Die Admins erhalten eine Meldung und müssen den Plan prüfen.'
+            : '';
+        if (!confirm(`Abwesenheit wirklich stornieren?${warning}`)) return;
+
+        try {
+            await DataManager.cancelOwnAbsence(absenceId);
+            this.renderEmployeeAbsencesPage();
+            this.renderDashboard();
+            this.showToast('Abwesenheit storniert. Die Admins wurden informiert.', 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'Abwesenheit konnte nicht storniert werden.', 'error');
+        }
     },
 
     openDefaultAvailabilityModal(employeeId) {
@@ -1608,6 +1663,7 @@ const App = {
                 else if (n.type === 'shift_request_response') icon = '✅';
                 else if (n.type === 'absence_request') icon = '📅';
                 else if (n.type === 'absence_notice') icon = '🤒';
+                else if (n.type === 'absence_cancelled') icon = '↩️';
 
                 const titleName = n.employeeName ? `${this.escapeHtml(n.employeeName)}: ` : '';
 
@@ -1629,7 +1685,7 @@ const App = {
                             <button class="btn btn-primary btn-small" onclick="App.openNotificationPlan('${context}')">Im Plan öffnen</button>
                         </div>
                     `;
-                } else if (!actions && n.type === 'absence_notice') {
+                } else if (!actions && ['absence_notice', 'absence_cancelled'].includes(n.type)) {
                     const context = this.encodeActionData(JSON.stringify({ notificationId: n.id }));
                     actions = `
                         <div class="request-actions" style="margin-top: 8px; flex-direction: row;">
@@ -1639,7 +1695,7 @@ const App = {
                 }
 
                 return `
-                    <div class="notification-item ${['early', 'late', 'shift_request_response', 'absence_request', 'absence_notice'].includes(n.type) ? n.type : 'info'}">
+                    <div class="notification-item ${['early', 'late', 'shift_request_response', 'absence_request', 'absence_notice', 'absence_cancelled'].includes(n.type) ? n.type : 'info'}">
                         <span class="notification-icon">${icon}</span>
                         <div class="notification-content">
                             <div class="notification-title">${titleName}${this.escapeHtml(n.message || '')}${n.storeId ? ` · ${this.escapeHtml(DataManager.getStoreName(n.storeId))}` : ''}</div>
@@ -3165,6 +3221,7 @@ const App = {
                         <button class="btn btn-secondary btn-small" onclick="App.openEditEmployeeModal('${emp.id}')">✎</button>
                         ${inviteButton}
                         <button class="btn btn-danger btn-small" onclick="App.deleteEmployee('${emp.id}')">Archivieren</button>
+                        <button class="btn btn-danger btn-small btn-terminate" onclick="App.terminateEmployee('${emp.id}')">Entlassen</button>
                     </div>
                 </div>
             `;
@@ -3175,11 +3232,13 @@ const App = {
                 <div class="employee-info">
                     <div class="employee-name-row">
                         <span class="employee-name">${this.escapeHtml(employee.name)}</span>
-                        <span class="absence-pill pending">Archiviert</span>
+                        <span class="absence-pill ${employee.terminatedAt ? 'declined' : 'pending'}">${employee.terminatedAt ? 'Entlassen' : 'Archiviert'}</span>
                     </div>
                 </div>
                 <div class="employee-actions">
-                    <button class="btn btn-secondary btn-small" onclick="App.restoreEmployee('${employee.id}')">Wiederherstellen</button>
+                    ${employee.terminatedAt
+                        ? '<span class="employee-type">Zugang entfernt · Historie bleibt erhalten</span>'
+                        : `<button class="btn btn-secondary btn-small" onclick="App.restoreEmployee('${employee.id}')">Wiederherstellen</button>`}
                 </div>
             </div>
         `).join('');
@@ -3221,7 +3280,7 @@ const App = {
             const status = a.status || 'approved';
             const endDate = new Date(a.endDate);
             const startDate = new Date(a.startDate);
-            return endDate >= today && startDate <= futureDate && status !== 'declined';
+            return endDate >= today && startDate <= futureDate && ['pending', 'approved'].includes(status);
         }).sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
         
         if (relevantAbsences.length === 0) {
@@ -3247,7 +3306,9 @@ const App = {
             const status = absence.status || 'approved';
             const statusPill = status === 'pending'
                 ? '<span class="absence-pill pending">Wartet</span>'
-                : '<span class="absence-pill approved">Bestätigt</span>';
+                : status === 'cancelled'
+                    ? '<span class="absence-pill cancelled">Storniert</span>'
+                    : '<span class="absence-pill approved">Bestätigt</span>';
 
             let auControls = '';
             if (absence.type === 'krank') {
@@ -3607,6 +3668,23 @@ const App = {
             this.showToast(`${employee.name} wiederhergestellt.`, 'success');
         } catch (error) {
             this.showToast(error?.message || 'Mitarbeiter konnte nicht wiederhergestellt werden.', 'error');
+        }
+    },
+
+    async terminateEmployee(id) {
+        const employee = DataManager.getEmployee(id);
+        if (!employee) return;
+
+        const message = `${employee.name} wirklich entlassen?\n\nDer App-Zugang wird sofort entfernt. Arbeitspläne, Zeiten und Abwesenheiten bleiben als Historie erhalten. Diese Aktion kann nicht über „Wiederherstellen“ rückgängig gemacht werden.`;
+        if (!confirm(message)) return;
+
+        try {
+            await DataManager.terminateEmployee(id);
+            this.renderEmployeesTab();
+            this.renderAdminView();
+            this.showToast(`${employee.name} wurde entlassen. Der Zugang ist entfernt.`, 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'Mitarbeiter konnte nicht entlassen werden.', 'error');
         }
     },
 
