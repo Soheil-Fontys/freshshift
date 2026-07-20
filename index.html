@@ -66,8 +66,21 @@
   </head>
   <body>
     <div id="app">
+      <!-- Initial session check: prevents the login form flashing on reload. -->
+      <div id="loading-screen" class="screen active" aria-live="polite">
+        <div class="session-loading">
+          <img
+            src="icons/freshshift-icon-transparent.png"
+            alt=""
+            class="session-loading-logo"
+          />
+          <div class="session-spinner" aria-hidden="true"></div>
+          <p>Sitzung wird geprüft…</p>
+        </div>
+      </div>
+
       <!-- Login Screen -->
-      <div id="login-screen" class="screen active">
+      <div id="login-screen" class="screen">
         <div class="login-container">
           <div class="logo">
             <img
@@ -309,6 +322,15 @@
             <div id="schedule-status" class="schedule-status"></div>
             <div id="my-schedule-content" class="my-schedule-content"></div>
             <div id="weekly-summary" class="weekly-summary"></div>
+            <section id="team-schedule-section" class="team-schedule-section">
+              <div class="page-header team-schedule-header">
+                <div>
+                  <h3>Teamplan</h3>
+                  <p class="helper-text">Freigegebene Schichten deiner Kolleginnen und Kollegen.</p>
+                </div>
+              </div>
+              <div id="team-schedule-content" class="team-schedule-content"></div>
+            </section>
           </div>
 
           <!-- Employee Absences Page -->
@@ -324,7 +346,9 @@
             </div>
             <p class="helper-text">
               Urlaub wird als Anfrage an die Geschäftsleitung gesendet.
-              Krankheit wird sofort eingetragen (Info an Admin).
+              Krankheit wird sofort eingetragen (Info an Admin). Bei einer
+              eAU prüft die Geschäftsleitung nur den Nachweisstatus; Diagnosen
+              und medizinische Dokumente werden hier nicht gespeichert.
             </p>
             <div id="employee-absences-list" class="absences-list"></div>
           </div>
@@ -458,13 +482,15 @@
           </h2>
           <div class="header-actions">
             <select id="admin-store-select" class="store-select"></select>
-            <div
+            <button
+              type="button"
               id="notification-badge"
               class="notification-badge"
               style="display: none"
+              aria-label="Neue Meldungen öffnen"
             >
               <span id="notification-count">0</span>
-            </div>
+            </button>
           </div>
         </header>
 
@@ -570,6 +596,14 @@
                 id="admin-upcoming-absences"
                 class="admin-absences-list"
               ></div>
+            </div>
+
+            <div id="admin-activity-card" class="dashboard-card activity-card">
+              <div class="card-header">
+                <h3>Letzte Änderungen</h3>
+                <span class="card-subtitle">Für alle Admins sichtbar</span>
+              </div>
+              <div id="admin-activity-list" class="activity-list"></div>
             </div>
 
             <!-- Missing Availabilities Warning -->
