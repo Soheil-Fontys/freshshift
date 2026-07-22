@@ -3,7 +3,7 @@
  * Enables offline functionality and caching
  */
 
-const CACHE_NAME = 'freshshift-v14';
+const CACHE_NAME = 'freshshift-v15';
 const STATIC_ASSETS = [
     './',
     './index.html',
@@ -68,7 +68,8 @@ self.addEventListener('activate', (event) => {
     );
 });
 
-// Fetch event - serve from cache, fallback to network
+// Fetch event - prefer the network, then fall back to the cached app.
+// This makes normal deployments visible immediately while preserving offline use.
 self.addEventListener('fetch', (event) => {
     // Skip non-GET requests
     if (event.request.method !== 'GET') {
@@ -98,39 +99,21 @@ self.addEventListener('fetch', (event) => {
     }
     
     event.respondWith(
-        caches.match(event.request)
-            .then((cachedResponse) => {
-                if (cachedResponse) {
-                    // Return cached version
-                    return cachedResponse;
+        fetch(event.request)
+            .then((networkResponse) => {
+                if (networkResponse?.status === 200) {
+                    const responseToCache = networkResponse.clone();
+                    caches.open(CACHE_NAME).then(cache => cache.put(event.request, responseToCache));
                 }
-                
-                // Not in cache, fetch from network
-                return fetch(event.request)
-                    .then((networkResponse) => {
-                        // Don't cache if not a valid response
-                        if (!networkResponse || networkResponse.status !== 200) {
-                            return networkResponse;
-                        }
-                        
-                        // Clone the response (can only be used once)
-                        const responseToCache = networkResponse.clone();
-                        
-                        // Add to cache for future use
-                        caches.open(CACHE_NAME)
-                            .then((cache) => {
-                                cache.put(event.request, responseToCache);
-                            });
-                        
-                        return networkResponse;
-                    })
-                    .catch(() => {
-                        // Network failed, return offline fallback for HTML
-                        if (event.request.headers.get('accept')?.includes('text/html')) {
-                            return caches.match('./index.html');
-                        }
-                    });
+                return networkResponse;
             })
+            .catch(() => caches.match(event.request)
+                .then(cachedResponse => cachedResponse || (
+                    event.request.headers.get('accept')?.includes('text/html')
+                        ? caches.match('./index.html')
+                        : undefined
+                ))
+            )
     );
 });
 
