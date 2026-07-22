@@ -83,11 +83,15 @@ const App = {
             const context = await DataManager.connectToCloud(window.FreshShiftSupabase.ensureClient());
             this.lastCloudRefreshAt = Date.now();
             this.populateAdminStoreSelect();
+            this.updateViewSwitchers(context);
 
             if (context.role === 'admin') {
-                this.currentUser = null;
+                this.currentUser = context.employee || null;
                 this.setAuthStatus('');
-                this.showScreen('admin-screen');
+                const preferredView = context.employee
+                    ? localStorage.getItem('freshshift_view_mode')
+                    : null;
+                this.showScreen(preferredView === 'employee' ? 'dashboard-screen' : 'admin-screen');
                 return;
             }
 
@@ -141,6 +145,7 @@ const App = {
         try {
             const context = await DataManager.reloadCloudData();
             this.lastCloudRefreshAt = Date.now();
+            this.updateViewSwitchers(context);
 
             if (context.role === 'admin' && document.getElementById('admin-screen')?.classList.contains('active')) {
                 this.populateAdminStoreSelect();
@@ -227,6 +232,7 @@ const App = {
         document.getElementById('menu-close').addEventListener('click', () => this.toggleMenu());
         document.getElementById('menu-overlay').addEventListener('click', () => this.toggleMenu());
         document.getElementById('menu-logout').addEventListener('click', () => this.logout());
+        document.getElementById('switch-to-admin-view').addEventListener('click', () => this.switchView('admin'));
         
         // Dashboard Menu Items
         document.querySelectorAll('#side-menu .menu-item').forEach(item => {
@@ -285,6 +291,7 @@ const App = {
         }
         document.getElementById('admin-menu-close').addEventListener('click', () => this.toggleAdminMenu());
         document.getElementById('admin-menu-overlay').addEventListener('click', () => this.toggleAdminMenu());
+        document.getElementById('switch-to-employee-view').addEventListener('click', () => this.switchView('employee'));
         document.getElementById('admin-menu-logout').addEventListener('click', () => this.adminLogout());
         
         // Admin Menu Items
@@ -364,6 +371,31 @@ const App = {
             this.populateAdminStoreSelect();
             this.renderAdminDashboard();
         }
+    },
+
+    updateViewSwitchers(context = DataManager.getAuthContext?.()) {
+        const canSwitch = context?.role === 'admin' && Boolean(context?.employee);
+        const adminButton = document.getElementById('switch-to-admin-view');
+        const employeeButton = document.getElementById('switch-to-employee-view');
+        if (adminButton) adminButton.hidden = !canSwitch;
+        if (employeeButton) employeeButton.hidden = !canSwitch;
+    },
+
+    switchView(view) {
+        const context = DataManager.getAuthContext?.();
+        if (context?.role !== 'admin' || !context?.employee) {
+            this.showToast('Für dieses Konto ist keine zweite Ansicht verfügbar.', 'error');
+            return;
+        }
+
+        document.getElementById('side-menu')?.classList.remove('active');
+        document.getElementById('menu-overlay')?.classList.remove('active');
+        document.getElementById('admin-side-menu')?.classList.remove('active');
+        document.getElementById('admin-menu-overlay')?.classList.remove('active');
+
+        this.currentUser = context.employee;
+        localStorage.setItem('freshshift_view_mode', view);
+        this.showScreen(view === 'employee' ? 'dashboard-screen' : 'admin-screen');
     },
 
     showModal(modalId) {
