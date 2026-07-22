@@ -57,6 +57,8 @@
             email: row.email,
             active: row.active !== false,
             archivedAt: row.archived_at || null,
+            terminatedAt: row.terminated_at || null,
+            terminatedBy: row.terminated_by || null,
             primaryStore: primary,
             stores: links.map(link => link.store_id),
             defaultAvailability: row.default_availability_json || {}
@@ -152,6 +154,8 @@
             requestedAt: row.requested_at,
             respondedAt: row.responded_at,
             responseReason: row.response_reason,
+            cancelledAt: row.cancelled_at || null,
+            cancelledBy: row.cancelled_by || null,
             auRequired: Boolean(row.au_required),
             auStatus: row.au_status || 'not_required',
             auVerifiedAt: row.au_verified_at || null,
@@ -251,7 +255,7 @@
 
         const results = await Promise.all([
             supabase.from('stores').select('id,name').order('name'),
-            supabase.from('employees').select('id,name,type,hourly_rate,profile_id,email,active,archived_at,default_availability_json').order('name'),
+            supabase.from('employees').select('id,name,type,hourly_rate,profile_id,email,active,archived_at,terminated_at,terminated_by,default_availability_json').order('name'),
             supabase.from('employee_stores').select('employee_id,store_id,is_primary'),
             supabase.from('availabilities').select('*'),
             supabase.from('schedules').select('*'),
@@ -413,6 +417,13 @@
             return employee || null;
         },
 
+        async terminateEmployee(id) {
+            requireAdmin();
+            await window.FreshShiftSupabase.invoke('terminate-employee', { employeeId: id });
+            await loadCloudData();
+            return cache.employees.find(employee => employee.id === id) || null;
+        },
+
         getAvailabilities() {
             return cache.availabilities;
         },
@@ -434,6 +445,34 @@
             const mapped = mapAvailability(saved);
             replaceById(cache.availabilities, mapped);
             return mapped;
+        },
+
+        async resetAvailability(employeeId, weekKey, storeId) {
+            requireAdmin();
+            const normalizedStoreId = this.normalizeStoreId(storeId);
+            unwrap(await requireClient().rpc('reset_employee_availability', {
+                p_employee_id: employeeId,
+                p_store_id: normalizedStoreId,
+                p_week_key: weekKey
+            }), 'Verfügbarkeit konnte nicht zurückgesetzt werden.');
+
+            cache.availabilities = cache.availabilities.filter(availability => !(
+                availability.employeeId === employeeId
+                && availability.weekKey === weekKey
+                && availability.storeId === normalizedStoreId
+            ));
+        },
+
+        async updateEmployeeEmail(employeeId, email, expectedEmail) {
+            requireAdmin();
+            const result = await window.FreshShiftSupabase.invoke('update-employee-email', {
+                employeeId,
+                email,
+                expectedEmail,
+                redirectTo: window.location.origin + window.location.pathname
+            });
+            await loadCloudData();
+            return result;
         },
 
         getSchedules() {
@@ -580,6 +619,17 @@
                 p_absence_id: id,
                 p_status: status
             }), 'eAU-Status konnte nicht aktualisiert werden.');
+            await loadCloudData();
+            return cache.absences.find(item => item.id === id) || null;
+        },
+
+        async cancelOwnAbsence(id) {
+            if (role !== 'employee' || !currentEmployee) {
+                throw new Error('Nur Mitarbeiter können ihre eigene Abwesenheit stornieren.');
+            }
+            unwrap(await requireClient().rpc('cancel_own_absence', {
+                p_absence_id: id
+            }), 'Abwesenheit konnte nicht storniert werden.');
             await loadCloudData();
             return cache.absences.find(item => item.id === id) || null;
         },

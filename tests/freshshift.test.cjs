@@ -12,15 +12,20 @@ test('login screen only exposes invited-email authentication', () => {
 
     assert.match(html, /id="auth-email"/);
     assert.match(html, /id="auth-send-link"/);
+    assert.match(html, /id="auth-code"/);
+    assert.match(html, /id="auth-verify-code"/);
     assert.match(html, /js\/cloud-data\.js/);
     assert.match(html, /id="team-schedule-content"/);
     assert.match(html, /id="admin-activity-list"/);
+    assert.match(html, /id="download-team-pdf"/);
+    assert.match(html, /jspdf@4\.2\.1/);
+    assert.match(html, /jspdf-autotable@5\.0\.8/);
     assert.match(html, /<button\s+type="button"\s+id="notification-badge"/);
     assert.doesNotMatch(html, /id="admin-password"/);
     assert.doesNotMatch(html, /id="employee-select"/);
     assert.match(html, /id="loading-screen" class="screen active"/);
     assert.doesNotMatch(html, /id="login-screen" class="screen active"/);
-    assert.match(serviceWorker, /freshshift-v11/);
+    assert.match(serviceWorker, /freshshift-v13/);
 });
 
 test('ISO week keys use the ISO week-year at New Year', () => {
@@ -68,6 +73,30 @@ test('magic-link login cannot create uninvited users', async () => {
     assert.equal(otpRequest.email, 'user@example.com');
     assert.equal(otpRequest.options.shouldCreateUser, false);
     assert.equal(otpRequest.options.emailRedirectTo, 'http://localhost:3000/');
+});
+
+test('email code login verifies a six-digit OTP inside the current app', async () => {
+    let verification = null;
+    const fakeClient = {
+        auth: {
+            verifyOtp: async request => {
+                verification = request;
+                return { data: { session: { access_token: 'test' } }, error: null };
+            }
+        }
+    };
+    const window = {
+        FRESHSHIFT_SUPABASE_URL: 'https://example.supabase.co',
+        FRESHSHIFT_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_test',
+        supabase: { createClient: () => fakeClient }
+    };
+    const context = vm.createContext({ window, console });
+    vm.runInContext(fs.readFileSync(path.join(root, 'js/supabase.js'), 'utf8'), context);
+
+    await window.FreshShiftSupabase.verifyEmailCode(' USER@EXAMPLE.COM ', ' 123456 ');
+    assert.equal(verification.email, 'user@example.com');
+    assert.equal(verification.token, '123456');
+    assert.equal(verification.type, 'email');
 });
 
 test('Edge Function errors surface the safe server message', async () => {
@@ -260,6 +289,37 @@ test('HTML rendering helpers escape stored user content and action data', () => 
     assert.equal(vm.runInContext(`App.formatMinutesToTime(1500)`, context), '01:00');
 });
 
+test('employee PDF rows contain the complete released team week', () => {
+    const context = vm.createContext({
+        console,
+        document: { addEventListener: () => {} },
+        window: {},
+        localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} }
+    });
+    vm.runInContext(fs.readFileSync(path.join(root, 'js/data.js'), 'utf8'), context);
+    vm.runInContext(fs.readFileSync(path.join(root, 'js/app.js'), 'utf8'), context);
+    vm.runInContext(`
+        DataManager.getEmployee = id => ({ id, name: id === 'employee-1' ? 'Anna' : 'Leo' });
+        pdfSchedule = {
+            released: true,
+            shifts: {
+                monday: [
+                    { employeeId: 'employee-2', start: '12:00', end: '20:00', requestStatus: 'none' },
+                    { employeeId: 'employee-1', start: '10:00', end: '18:00', requestStatus: 'accepted' }
+                ],
+                tuesday: [
+                    { employeeId: 'employee-1', start: '11:00', end: '19:00', requestStatus: 'pending' }
+                ]
+            }
+        };
+    `, context);
+
+    const rows = vm.runInContext('App.buildWeeklyPdfRows(pdfSchedule)', context);
+    assert.equal(rows.length, 2);
+    assert.deepEqual(Array.from(rows[0]), ['Anna', '10:00–18:00', '–', '–', '–', '–', '–', '–']);
+    assert.deepEqual(Array.from(rows[1]), ['Leo', '12:00–20:00', '–', '–', '–', '–', '–', '–']);
+});
+
 test('release validation blocks invalid and unresolved shifts', () => {
     const context = vm.createContext({
         console,
@@ -326,6 +386,28 @@ test('production hardening preserves history and separates save from release', (
         path.join(root, 'supabase/migrations/20260720131500_close_concurrency_edges.sql'),
         'utf8'
     );
+    const lifecycleMigration = fs.readFileSync(
+        path.join(root, 'supabase/migrations/20260720150000_employee_lifecycle_and_absence_cancellation.sql'),
+        'utf8'
+    );
+    const cancellationHardeningMigration = fs.readFileSync(
+        path.join(root, 'supabase/migrations/20260720151500_harden_absence_cancellation.sql'),
+        'utf8'
+    );
+    const terminationFunction = fs.readFileSync(
+        path.join(root, 'supabase/functions/terminate-employee/index.ts'),
+        'utf8'
+    );
+    const pilotToolsMigration = fs.readFileSync(
+        path.join(root, 'supabase/migrations/20260722164148_pilot_admin_tools.sql'),
+        'utf8'
+    );
+    const emailFunction = fs.readFileSync(
+        path.join(root, 'supabase/functions/update-employee-email/index.ts'),
+        'utf8'
+    );
+    const cloudAdapter = fs.readFileSync(path.join(root, 'js/cloud-data.js'), 'utf8');
+    const app = fs.readFileSync(path.join(root, 'js/app.js'), 'utf8');
 
     assert.match(migration, /create or replace function public\.archive_employee/);
     assert.match(migration, /create or replace function public\.restore_employee/);
@@ -341,4 +423,23 @@ test('production hardening preserves history and separates save from release', (
     assert.match(collaborationMigration, /au_status in \('not_required', 'pending', 'verified'\)/);
     assert.match(concurrencyMigration, /bump_schedule_version_for_employee_update/);
     assert.match(concurrencyMigration, /new\.end_date - new\.start_date/);
+    assert.match(lifecycleMigration, /create or replace function public\.cancel_own_absence/);
+    assert.match(lifecycleMigration, /terminated_at/);
+    assert.match(lifecycleMigration, /status in \('pending', 'approved', 'declined', 'cancelled'\)/);
+    assert.match(cancellationHardeningMigration, /security invoker/);
+    assert.match(cancellationHardeningMigration, /absences_employee_cancel_own/);
+    assert.match(cancellationHardeningMigration, /guard_employee_absence_cancellation/);
+    assert.match(terminationFunction, /admin\.deleteUser\(authUserId\)/);
+    assert.match(terminationFunction, /profile_id: null/);
+    assert.match(pilotToolsMigration, /create or replace function public\.reset_employee_availability/);
+    assert.match(pilotToolsMigration, /sync_employee_email_from_auth/);
+    assert.match(pilotToolsMigration, /revoke all on function public\.sync_employee_email_from_auth[\s\S]*authenticated/);
+    assert.match(emailFunction, /admin\.updateUserById/);
+    assert.match(emailFunction, /expectedEmail/);
+    assert.match(emailFunction, /shouldCreateUser: false/);
+    assert.match(cloudAdapter, /reset_employee_availability/);
+    assert.match(cloudAdapter, /update-employee-email/);
+    assert.match(app, /downloadEmployeeSchedulePdf/);
+    assert.match(app, /resetAvailability/);
+    assert.match(app, /openUpdateEmployeeEmail/);
 });

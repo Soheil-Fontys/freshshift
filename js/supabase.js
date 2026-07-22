@@ -64,6 +64,22 @@
         if (error) throw error;
     }
 
+    async function verifyEmailCode(email, token) {
+        const normalizedEmail = String(email || '').trim().toLowerCase();
+        const normalizedToken = String(token || '').replace(/\s+/g, '');
+        if (!normalizedEmail) throw new Error('Bitte eine Email-Adresse eingeben.');
+        if (!/^\d{6}$/.test(normalizedToken)) throw new Error('Bitte den 6-stelligen Code eingeben.');
+
+        const { data, error } = await ensureClient().auth.verifyOtp({
+            email: normalizedEmail,
+            token: normalizedToken,
+            type: 'email'
+        });
+        if (error) throw error;
+        if (!data?.session) throw new Error('Der Code konnte keine Sitzung erstellen.');
+        return data.session;
+    }
+
     async function signOut() {
         const { error } = await ensureClient().auth.signOut();
         if (error) throw error;
@@ -102,6 +118,7 @@
         init,
         ensureClient,
         sendMagicLink,
+        verifyEmailCode,
         signOut,
         getSession,
         getAccessToken,

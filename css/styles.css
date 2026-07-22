@@ -627,6 +627,24 @@ body {
     cursor: not-allowed;
 }
 
+.auth-code-group {
+    margin-top: var(--space-md);
+    padding-top: var(--space-md);
+    border-top: 1px solid var(--gray-200);
+}
+
+.auth-code-group[hidden] {
+    display: none;
+}
+
+#auth-code {
+    text-align: center;
+    font-size: 1.4rem;
+    font-weight: 700;
+    letter-spacing: 0.35em;
+    font-variant-numeric: tabular-nums;
+}
+
 .editor-hint {
     margin-top: var(--space-md);
     font-size: 0.8rem;
@@ -2630,6 +2648,28 @@ body {
     box-shadow: var(--shadow-sm);
 }
 
+.availability-reset-header,
+.availability-reset-cell {
+    width: 7.5rem;
+    text-align: center;
+}
+
+.availability-reset-button {
+    width: 100%;
+    margin-top: var(--space-md);
+}
+
+@media (max-width: 480px) {
+    #page-schedule .page-header-with-action {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    #download-team-pdf {
+        width: 100%;
+    }
+}
+
 .availability-card-header {
     display: flex;
     justify-content: space-between;
@@ -3023,6 +3063,20 @@ body {
     color: #b91c1c;
 }
 
+.absence-pill.cancelled {
+    background: var(--gray-200);
+    color: var(--gray-700);
+}
+
+.absence-actions {
+    margin-top: var(--space-sm);
+}
+
+.btn-terminate {
+    border-color: #991b1b;
+    background: #991b1b;
+}
+
 
 .absence-item {
     display: flex;
@@ -3287,7 +3341,8 @@ body {
 
 @media print {
     @page {
-        margin: 12mm;
+        size: A4 landscape;
+        margin: 8mm;
     }
 
     body {
@@ -3307,10 +3362,14 @@ body {
     }
 
     #page-admin-planner {
-        position: absolute !important;
+        position: fixed !important;
         left: 0 !important;
+        right: 0 !important;
         top: 0 !important;
-        width: 100% !important;
+        width: auto !important;
+        max-width: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
     }
 
     #page-admin-planner .page-header,
@@ -3329,8 +3388,10 @@ body {
 
     .schedule-table {
         width: 100% !important;
+        max-width: 100% !important;
         border-collapse: collapse !important;
-        font-size: 0.9rem;
+        table-layout: fixed !important;
+        font-size: 8pt !important;
     }
 
     .schedule-table th,
@@ -3338,6 +3399,33 @@ body {
         border: 1px solid #e5e7eb !important;
         background: white !important;
         color: #111827 !important;
+        min-width: 0 !important;
+        width: auto !important;
+        padding: 3px 2px !important;
+        overflow-wrap: anywhere;
+    }
+
+    .schedule-table th:first-child,
+    .schedule-table td.name-cell {
+        width: 17% !important;
+        text-align: left !important;
+    }
+
+    .schedule-editor,
+    .planner-desktop {
+        display: block !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        overflow: visible !important;
+    }
+
+    .planner-mobile {
+        display: none !important;
+    }
+
+    .schedule-table .shift-time {
+        font-size: 7.5pt !important;
+        white-space: nowrap;
     }
 
     .schedule-table td.shift-cell.cell-absent,

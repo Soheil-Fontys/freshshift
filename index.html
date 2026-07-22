@@ -95,7 +95,7 @@
             <div class="login-icon">🔐</div>
             <p class="login-hint">
               Melde dich mit deiner eingeladenen Email-Adresse an. Du erhältst
-              einen sicheren Anmeldelink ohne Passwort.
+              einen sicheren Anmeldecode ohne Passwort.
             </p>
 
             <div class="form-group">
@@ -110,8 +110,25 @@
             </div>
 
             <button type="button" id="auth-send-link" class="btn btn-primary btn-large btn-full">
-              Anmeldelink senden
+              Anmeldecode senden
             </button>
+            <div id="auth-code-group" class="auth-code-group" hidden>
+              <div class="form-group">
+                <label for="auth-code">6-stelliger Code aus der Email</label>
+                <input
+                  type="text"
+                  id="auth-code"
+                  inputmode="numeric"
+                  autocomplete="one-time-code"
+                  maxlength="6"
+                  pattern="[0-9]{6}"
+                  placeholder="123456"
+                />
+              </div>
+              <button type="button" id="auth-verify-code" class="btn btn-success btn-large btn-full">
+                Mit Code anmelden
+              </button>
+            </div>
             <button
               type="button"
               id="auth-signout"
@@ -306,8 +323,16 @@
 
           <!-- Schedule Page -->
           <div id="page-schedule" class="page-content">
-            <div class="page-header">
+            <div class="page-header-with-action">
               <h3>Mein Schichtplan</h3>
+              <button
+                type="button"
+                id="download-team-pdf"
+                class="btn btn-secondary btn-small"
+                disabled
+              >
+                <span class="btn-icon-inline">⬇</span> Wochenplan als PDF
+              </button>
             </div>
             <div class="store-row" id="my-store-row" style="display: none">
               <label for="my-store-select" class="store-label">Geschäft</label>
@@ -1141,6 +1166,8 @@
         "sb_publishable_oIlen9vQLozQghcqGJTMjQ_W03bXXqX";
     </script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.7"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@4.2.1/dist/jspdf.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@5.0.8/dist/jspdf.plugin.autotable.min.js"></script>
     <script src="js/supabase.js"></script>
 
     <script src="js/data.js"></script>

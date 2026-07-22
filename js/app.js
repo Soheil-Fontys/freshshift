@@ -172,13 +172,33 @@ const App = {
         const email = document.getElementById('auth-email')?.value || '';
         const button = document.getElementById('auth-send-link');
         if (button) button.disabled = true;
-        this.setAuthStatus('Anmeldelink wird gesendet…');
+        this.setAuthStatus('Anmeldecode wird gesendet…');
 
         try {
             await window.FreshShiftSupabase.sendMagicLink(email);
-            this.setAuthStatus('Anmeldelink gesendet. Bitte öffne deine Email.');
+            const codeGroup = document.getElementById('auth-code-group');
+            if (codeGroup) codeGroup.hidden = false;
+            document.getElementById('auth-code')?.focus();
+            this.setAuthStatus('Code gesendet. Öffne die Email und gib den 6-stelligen Code hier ein.');
         } catch (error) {
-            this.setAuthStatus(error?.message || 'Anmeldelink konnte nicht gesendet werden.', true);
+            this.setAuthStatus(error?.message || 'Anmeldecode konnte nicht gesendet werden.', true);
+        } finally {
+            if (button) button.disabled = false;
+        }
+    },
+
+    async verifyAuthCode() {
+        const email = document.getElementById('auth-email')?.value || '';
+        const token = document.getElementById('auth-code')?.value || '';
+        const button = document.getElementById('auth-verify-code');
+        if (button) button.disabled = true;
+        this.setAuthStatus('Code wird geprüft…');
+
+        try {
+            await window.FreshShiftSupabase.verifyEmailCode(email, token);
+            this.setAuthStatus('Angemeldet. Daten werden geladen…');
+        } catch (error) {
+            this.setAuthStatus(error?.message || 'Code ist ungültig oder abgelaufen.', true);
         } finally {
             if (button) button.disabled = false;
         }
@@ -192,6 +212,13 @@ const App = {
         document.getElementById('auth-send-link').addEventListener('click', () => this.sendAuthLink());
         document.getElementById('auth-email').addEventListener('keypress', (event) => {
             if (event.key === 'Enter') this.sendAuthLink();
+        });
+        document.getElementById('auth-verify-code').addEventListener('click', () => this.verifyAuthCode());
+        document.getElementById('auth-code').addEventListener('input', event => {
+            event.target.value = event.target.value.replace(/\D/g, '').slice(0, 6);
+        });
+        document.getElementById('auth-code').addEventListener('keypress', event => {
+            if (event.key === 'Enter') this.verifyAuthCode();
         });
         document.getElementById('auth-signout').addEventListener('click', () => this.logout());
 
@@ -216,6 +243,7 @@ const App = {
         document.getElementById('next-week').addEventListener('click', () => this.changeWeek(1));
         document.getElementById('my-prev-week').addEventListener('click', () => this.changeWeek(-1, false, true));
         document.getElementById('my-next-week').addEventListener('click', () => this.changeWeek(1, false, true));
+        document.getElementById('download-team-pdf').addEventListener('click', () => this.downloadEmployeeSchedulePdf());
 
         // Report Late Modal
         document.getElementById('submit-late').addEventListener('click', () => this.submitLateReport());
@@ -452,7 +480,7 @@ const App = {
         DateUtils.DAY_KEYS.forEach((dayKey, index) => {
             html += `<th>${DateUtils.DAYS_SHORT[index]}<br><small>${DateUtils.formatDate(dates[index])}</small></th>`;
         });
-        html += '</tr></thead><tbody>';
+        html += '<th class="availability-reset-header">Test</th></tr></thead><tbody>';
 
         // Rows
         employees.forEach(emp => {
@@ -473,6 +501,9 @@ const App = {
                     html += `<td class="unavailable-cell">–</td>`;
                 }
             });
+            html += `<td class="availability-reset-cell">${avail
+                ? `<button type="button" class="btn btn-secondary btn-small" onclick="App.resetAvailability('${emp.id}', '${this.encodeActionData(emp.name)}')">Zurücksetzen</button>`
+                : '<span class="muted">–</span>'}</td>`;
             html += '</tr>';
         });
 
@@ -502,9 +533,27 @@ const App = {
                         </div>
                         ${avail?.notes ? `<div class="availability-general-note">${this.escapeHtml(avail.notes)}</div>` : ''}
                         <div class="availability-grid">${pills}</div>
+                        ${avail ? `<button type="button" class="btn btn-secondary btn-small availability-reset-button" onclick="App.resetAvailability('${emp.id}', '${this.encodeActionData(emp.name)}')">Test-Eintrag zurücksetzen</button>` : ''}
                     </div>
                 `;
             }).join('') || '<div class="empty-state">Keine Verfügbarkeiten</div>';
+        }
+    },
+
+    async resetAvailability(employeeId, employeeNameEncoded) {
+        const employeeName = decodeURIComponent(employeeNameEncoded || '') || this.getEmployeeName(employeeId);
+        const weekLabel = DateUtils.formatWeekDisplay(this.availWeek);
+        const storeName = DataManager.getStoreName(this.adminStore);
+        const message = `Verfügbarkeit von ${employeeName} für ${weekLabel} bei ${storeName} zurücksetzen?\n\nDer eingetragene Test-Eintrag wird gelöscht. Der Mitarbeiter kann ihn danach neu eingeben.`;
+        if (!confirm(message)) return;
+
+        try {
+            await DataManager.resetAvailability(employeeId, DateUtils.getWeekKey(this.availWeek), this.adminStore);
+            this.renderAdminAvailability();
+            this.renderAdminDashboard();
+            this.showToast(`Verfügbarkeit von ${employeeName} zurückgesetzt.`, 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'Verfügbarkeit konnte nicht zurückgesetzt werden.', 'error');
         }
     },
 
@@ -941,7 +990,9 @@ const App = {
                 : `${DateUtils.formatDate(startDate)} – ${DateUtils.formatDate(endDate)}`;
 
             const status = a.status || 'approved';
-            const statusLabel = status === 'pending' ? 'Wartet' : status === 'declined' ? 'Abgelehnt' : 'Bestätigt';
+            const statusLabel = status === 'pending' ? 'Wartet'
+                : status === 'declined' ? 'Abgelehnt'
+                    : status === 'cancelled' ? 'Storniert' : 'Bestätigt';
 
             const statusPill = `<span class="absence-pill ${status}">${statusLabel}</span>`;
             const reason = a.responseReason ? `<div class="absence-note">Grund: ${this.escapeHtml(a.responseReason)}</div>` : '';
@@ -953,6 +1004,9 @@ const App = {
                         : '<span class="au-pill not-required">Aktuell keine eAU erforderlich</span>'
                 : '';
 
+            const canCancel = ['pending', 'approved'].includes(status)
+                && String(a.endDate) >= DateUtils.formatDateKey(new Date());
+
             return `
                 <div class="absence-item ${status === 'pending' ? 'absence-active' : ''}">
                     <span class="absence-icon">${typeIcon}</span>
@@ -962,10 +1016,33 @@ const App = {
                         ${a.note ? `<div class="absence-note">${this.escapeHtml(a.note)}</div>` : ''}
                         ${reason}
                         ${auStatus}
+                        ${canCancel ? `
+                            <div class="absence-actions">
+                                <button class="btn btn-danger btn-small" onclick="App.cancelOwnAbsence('${a.id}')">Abwesenheit stornieren</button>
+                            </div>
+                        ` : ''}
                     </div>
                 </div>
             `;
         }).join('');
+    },
+
+    async cancelOwnAbsence(absenceId) {
+        const absence = DataManager.getAbsence(absenceId);
+        if (!absence) return;
+        const warning = absence.status === 'approved'
+            ? '\n\nBereits entfernte Schichten werden nicht automatisch wiederhergestellt. Die Admins erhalten eine Meldung und müssen den Plan prüfen.'
+            : '';
+        if (!confirm(`Abwesenheit wirklich stornieren?${warning}`)) return;
+
+        try {
+            await DataManager.cancelOwnAbsence(absenceId);
+            this.renderEmployeeAbsencesPage();
+            this.renderDashboard();
+            this.showToast('Abwesenheit storniert. Die Admins wurden informiert.', 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'Abwesenheit konnte nicht storniert werden.', 'error');
+        }
     },
 
     openDefaultAvailabilityModal(employeeId) {
@@ -1090,7 +1167,8 @@ const App = {
         const employeeName = decodeURIComponent(employeeNameEncoded || '').trim();
         if (!id || !employeeName) return;
 
-        const email = (prompt(`Email für ${employeeName}:`, '') || '').trim().toLowerCase();
+        const currentEmail = DataManager.getEmployee(id)?.email || '';
+        const email = (prompt(`Email für ${employeeName}:`, currentEmail) || '').trim().toLowerCase();
         if (!email) return;
         if (email.length > 254 || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
             this.showToast('Bitte eine gültige Email-Adresse eingeben.', 'error');
@@ -1110,6 +1188,34 @@ const App = {
         } catch (e) {
             const msg = e?.message || 'Invite fehlgeschlagen';
             this.showToast(msg === 'Failed to fetch' ? 'Invite fehlgeschlagen (Netzwerk/CORS).' : msg, 'error');
+        }
+    },
+
+    async openUpdateEmployeeEmail(employeeId, employeeNameEncoded) {
+        const employee = DataManager.getEmployee(employeeId);
+        const employeeName = decodeURIComponent(employeeNameEncoded || '') || employee?.name;
+        if (!employee?.profileId || !employeeName) return;
+
+        const previousEmail = String(employee.email || '').trim().toLowerCase();
+        const email = (prompt(`Email für ${employeeName} korrigieren:`, previousEmail) || '').trim().toLowerCase();
+        if (!email || email === previousEmail) return;
+        if (email.length > 254 || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+            this.showToast('Bitte eine gültige Email-Adresse eingeben.', 'error');
+            return;
+        }
+
+        const message = `Email von ${employeeName} ändern?\n\nAlt: ${previousEmail}\nNeu: ${email}\n\nDie alte Adresse kann danach nicht mehr zur Anmeldung verwendet werden. An die neue Adresse wird ein frischer Anmeldecode gesendet.`;
+        if (!confirm(message)) return;
+
+        try {
+            const result = await DataManager.updateEmployeeEmail(employee.id, email, previousEmail);
+            this.renderEmployeesTab();
+            this.renderAdminDashboard();
+            this.showToast(result?.loginEmailSent
+                ? `Email geändert. Anmeldecode wurde an ${email} gesendet.`
+                : `Email geändert. ${employeeName} kann jetzt selbst einen Anmeldecode anfordern.`, 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'Email konnte nicht geändert werden.', 'error');
         }
     },
 
@@ -1358,7 +1464,11 @@ const App = {
             shift_response: ['↔️', 'hat auf eine Schichtanfrage geantwortet'],
             absence_approved: ['📅', 'hat eine Abwesenheit bestätigt'],
             absence_schedule_cleanup: ['🧹', 'Schichten wurden wegen Abwesenheit entfernt'],
-            au_status_changed: ['🩺', 'hat den eAU-Status geändert']
+            absence_cancelled: ['↩️', 'hat eine Abwesenheit storniert'],
+            au_status_changed: ['🩺', 'hat den eAU-Status geändert'],
+            employee_terminated: ['🚫', 'hat einen Mitarbeiter entlassen'],
+            availability_reset: ['🧪', 'hat eine Test-Verfügbarkeit zurückgesetzt'],
+            employee_email_updated: ['✉️', 'hat eine Mitarbeiter-Email korrigiert']
         };
 
         container.innerHTML = activity.slice(0, 12).map(item => {
@@ -1608,6 +1718,7 @@ const App = {
                 else if (n.type === 'shift_request_response') icon = '✅';
                 else if (n.type === 'absence_request') icon = '📅';
                 else if (n.type === 'absence_notice') icon = '🤒';
+                else if (n.type === 'absence_cancelled') icon = '↩️';
 
                 const titleName = n.employeeName ? `${this.escapeHtml(n.employeeName)}: ` : '';
 
@@ -1629,7 +1740,7 @@ const App = {
                             <button class="btn btn-primary btn-small" onclick="App.openNotificationPlan('${context}')">Im Plan öffnen</button>
                         </div>
                     `;
-                } else if (!actions && n.type === 'absence_notice') {
+                } else if (!actions && ['absence_notice', 'absence_cancelled'].includes(n.type)) {
                     const context = this.encodeActionData(JSON.stringify({ notificationId: n.id }));
                     actions = `
                         <div class="request-actions" style="margin-top: 8px; flex-direction: row;">
@@ -1639,7 +1750,7 @@ const App = {
                 }
 
                 return `
-                    <div class="notification-item ${['early', 'late', 'shift_request_response', 'absence_request', 'absence_notice'].includes(n.type) ? n.type : 'info'}">
+                    <div class="notification-item ${['early', 'late', 'shift_request_response', 'absence_request', 'absence_notice', 'absence_cancelled'].includes(n.type) ? n.type : 'info'}">
                         <span class="notification-icon">${icon}</span>
                         <div class="notification-content">
                             <div class="notification-title">${titleName}${this.escapeHtml(n.message || '')}${n.storeId ? ` · ${this.escapeHtml(DataManager.getStoreName(n.storeId))}` : ''}</div>
@@ -2302,14 +2413,17 @@ const App = {
     renderTeamSchedule(schedule, dates) {
         const container = document.getElementById('team-schedule-content');
         const section = document.getElementById('team-schedule-section');
+        const downloadButton = document.getElementById('download-team-pdf');
         if (!container || !section) return;
 
         if (!schedule?.released) {
+            if (downloadButton) downloadButton.disabled = true;
             section.style.display = 'none';
             container.innerHTML = '';
             return;
         }
 
+        if (downloadButton) downloadButton.disabled = false;
         section.style.display = 'block';
         container.innerHTML = DateUtils.DAY_KEYS.map((dayKey, index) => {
             const shifts = (schedule.shifts?.[dayKey] || [])
@@ -2344,6 +2458,127 @@ const App = {
                 </div>
             `;
         }).join('');
+    },
+
+    buildWeeklyPdfRows(schedule) {
+        const rowsByEmployee = new Map();
+
+        DateUtils.DAY_KEYS.forEach((dayKey, dayIndex) => {
+            (schedule?.shifts?.[dayKey] || [])
+                .filter(shift => !['pending', 'declined'].includes(shift.requestStatus))
+                .forEach(shift => {
+                    const employeeId = shift.employeeId || `name:${shift.employeeName || 'Unbekannt'}`;
+                    if (!rowsByEmployee.has(employeeId)) {
+                        rowsByEmployee.set(employeeId, {
+                            employeeId: shift.employeeId || null,
+                            name: shift.employeeName || this.getEmployeeName(shift.employeeId),
+                            days: Array(7).fill('–')
+                        });
+                    }
+
+                    const row = rowsByEmployee.get(employeeId);
+                    const time = `${shift.start}–${shift.end}`;
+                    row.days[dayIndex] = row.days[dayIndex] === '–'
+                        ? time
+                        : `${row.days[dayIndex]}, ${time}`;
+                });
+        });
+
+        return Array.from(rowsByEmployee.values())
+            .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'de'))
+            .map(row => [row.name, ...row.days]);
+    },
+
+    downloadEmployeeSchedulePdf() {
+        const weekKey = DateUtils.getWeekKey(this.currentWeek);
+        const schedule = DataManager.getScheduleForWeek(weekKey, this.employeeStore);
+        if (!schedule?.released) {
+            this.showToast('Für diese Woche ist noch kein freigegebener Plan verfügbar.', 'error');
+            return;
+        }
+
+        const JsPdf = window.jspdf?.jsPDF;
+        if (!JsPdf) {
+            this.showToast('PDF-Modul konnte nicht geladen werden. Bitte prüfe die Internetverbindung.', 'error');
+            return;
+        }
+
+        try {
+            const doc = new JsPdf({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+            if (typeof doc.autoTable !== 'function') {
+                throw new Error('PDF table module unavailable');
+            }
+
+            const storeName = DataManager.getStoreName(this.employeeStore);
+            const rows = this.buildWeeklyPdfRows(schedule);
+            const dates = DateUtils.getWeekDates(this.currentWeek);
+            const headers = ['Mitarbeiter', ...DateUtils.DAYS_SHORT.map((day, index) =>
+                `${day}\n${DateUtils.formatDate(dates[index])}`)];
+
+            doc.setProperties({
+                title: `FreshShift ${DateUtils.formatWeekDisplay(this.currentWeek)} - ${storeName}`,
+                subject: 'Freigegebener Wochenplan',
+                creator: 'FreshShift'
+            });
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(16);
+            doc.setTextColor(11, 95, 165);
+            doc.text('FreshShift - Wochenplan', 8, 12);
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(9);
+            doc.setTextColor(75, 85, 99);
+            doc.text(`${DateUtils.formatWeekDisplay(this.currentWeek)} | ${storeName}`, 8, 18);
+
+            doc.autoTable({
+                startY: 23,
+                head: [headers],
+                body: rows.length > 0 ? rows : [['Keine Schichten', '–', '–', '–', '–', '–', '–', '–']],
+                theme: 'grid',
+                margin: { top: 23, right: 8, bottom: 12, left: 8 },
+                tableWidth: 281,
+                styles: {
+                    font: 'helvetica',
+                    fontSize: 7.5,
+                    cellPadding: 1.8,
+                    overflow: 'linebreak',
+                    valign: 'middle',
+                    textColor: [17, 24, 39],
+                    lineColor: [209, 213, 219],
+                    lineWidth: 0.2
+                },
+                headStyles: {
+                    fillColor: [11, 95, 165],
+                    textColor: [255, 255, 255],
+                    fontStyle: 'bold',
+                    halign: 'center'
+                },
+                bodyStyles: { minCellHeight: 7 },
+                alternateRowStyles: { fillColor: [243, 244, 246] },
+                columnStyles: {
+                    0: { cellWidth: 43, fontStyle: 'bold', halign: 'left' },
+                    1: { cellWidth: 34, halign: 'center' },
+                    2: { cellWidth: 34, halign: 'center' },
+                    3: { cellWidth: 34, halign: 'center' },
+                    4: { cellWidth: 34, halign: 'center' },
+                    5: { cellWidth: 34, halign: 'center' },
+                    6: { cellWidth: 34, halign: 'center' },
+                    7: { cellWidth: 34, halign: 'center' }
+                },
+                didDrawPage: data => {
+                    const pageNumber = doc.getNumberOfPages();
+                    doc.setFont('helvetica', 'normal');
+                    doc.setFontSize(7);
+                    doc.setTextColor(107, 114, 128);
+                    doc.text(`FreshShift | Seite ${pageNumber}`, data.settings.margin.left, 205);
+                }
+            });
+
+            const safeStore = String(storeName || 'Wochenplan').replace(/[^a-zA-Z0-9äöüÄÖÜß_-]+/g, '-');
+            doc.save(`FreshShift_${weekKey}_${safeStore}.pdf`);
+        } catch (error) {
+            console.error('FreshShift PDF generation failed', error);
+            this.showToast('PDF konnte nicht erstellt werden.', 'error');
+        }
     },
 
     // ===========================
@@ -3140,6 +3375,9 @@ const App = {
             const inviteButton = emp.profileId
                 ? '<button class="btn btn-secondary btn-small" disabled>Eingeladen</button>'
                 : `<button class="btn btn-primary btn-small" onclick="App.openInviteEmployee('${emp.id}', '${this.encodeActionData(emp.name)}')"><span class="btn-icon-inline">✉️</span> Einladen</button>`;
+            const emailButton = emp.profileId && emp.email
+                ? `<button class="btn btn-secondary btn-small" onclick="App.openUpdateEmployeeEmail('${emp.id}', '${this.encodeActionData(emp.name)}')"><span class="btn-icon-inline">✉</span> Email ändern</button>`
+                : '';
 
             return `
                 <div class="employee-card ${currentAbsence ? 'employee-absent' : ''}">
@@ -3164,7 +3402,9 @@ const App = {
                         </button>
                         <button class="btn btn-secondary btn-small" onclick="App.openEditEmployeeModal('${emp.id}')">✎</button>
                         ${inviteButton}
+                        ${emailButton}
                         <button class="btn btn-danger btn-small" onclick="App.deleteEmployee('${emp.id}')">Archivieren</button>
+                        <button class="btn btn-danger btn-small btn-terminate" onclick="App.terminateEmployee('${emp.id}')">Entlassen</button>
                     </div>
                 </div>
             `;
@@ -3175,11 +3415,13 @@ const App = {
                 <div class="employee-info">
                     <div class="employee-name-row">
                         <span class="employee-name">${this.escapeHtml(employee.name)}</span>
-                        <span class="absence-pill pending">Archiviert</span>
+                        <span class="absence-pill ${employee.terminatedAt ? 'declined' : 'pending'}">${employee.terminatedAt ? 'Entlassen' : 'Archiviert'}</span>
                     </div>
                 </div>
                 <div class="employee-actions">
-                    <button class="btn btn-secondary btn-small" onclick="App.restoreEmployee('${employee.id}')">Wiederherstellen</button>
+                    ${employee.terminatedAt
+                        ? '<span class="employee-type">Zugang entfernt · Historie bleibt erhalten</span>'
+                        : `<button class="btn btn-secondary btn-small" onclick="App.restoreEmployee('${employee.id}')">Wiederherstellen</button>`}
                 </div>
             </div>
         `).join('');
@@ -3221,7 +3463,7 @@ const App = {
             const status = a.status || 'approved';
             const endDate = new Date(a.endDate);
             const startDate = new Date(a.startDate);
-            return endDate >= today && startDate <= futureDate && status !== 'declined';
+            return endDate >= today && startDate <= futureDate && ['pending', 'approved'].includes(status);
         }).sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
         
         if (relevantAbsences.length === 0) {
@@ -3247,7 +3489,9 @@ const App = {
             const status = absence.status || 'approved';
             const statusPill = status === 'pending'
                 ? '<span class="absence-pill pending">Wartet</span>'
-                : '<span class="absence-pill approved">Bestätigt</span>';
+                : status === 'cancelled'
+                    ? '<span class="absence-pill cancelled">Storniert</span>'
+                    : '<span class="absence-pill approved">Bestätigt</span>';
 
             let auControls = '';
             if (absence.type === 'krank') {
@@ -3607,6 +3851,23 @@ const App = {
             this.showToast(`${employee.name} wiederhergestellt.`, 'success');
         } catch (error) {
             this.showToast(error?.message || 'Mitarbeiter konnte nicht wiederhergestellt werden.', 'error');
+        }
+    },
+
+    async terminateEmployee(id) {
+        const employee = DataManager.getEmployee(id);
+        if (!employee) return;
+
+        const message = `${employee.name} wirklich entlassen?\n\nDer App-Zugang wird sofort entfernt. Arbeitspläne, Zeiten und Abwesenheiten bleiben als Historie erhalten. Diese Aktion kann nicht über „Wiederherstellen“ rückgängig gemacht werden.`;
+        if (!confirm(message)) return;
+
+        try {
+            await DataManager.terminateEmployee(id);
+            this.renderEmployeesTab();
+            this.renderAdminView();
+            this.showToast(`${employee.name} wurde entlassen. Der Zugang ist entfernt.`, 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'Mitarbeiter konnte nicht entlassen werden.', 'error');
         }
     },
 
