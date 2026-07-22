@@ -114,15 +114,15 @@
             </button>
             <div id="auth-code-group" class="auth-code-group" hidden>
               <div class="form-group">
-                <label for="auth-code">6-stelliger Code aus der Email</label>
+                <label for="auth-code">8-stelliger Code aus der Email</label>
                 <input
                   type="text"
                   id="auth-code"
                   inputmode="numeric"
                   autocomplete="one-time-code"
-                  maxlength="6"
-                  pattern="[0-9]{6}"
-                  placeholder="123456"
+                  maxlength="8"
+                  pattern="[0-9]{8}"
+                  placeholder="12345678"
                 />
               </div>
               <button type="button" id="auth-verify-code" class="btn btn-success btn-large btn-full">

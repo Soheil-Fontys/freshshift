@@ -184,7 +184,7 @@ const App = {
             const codeGroup = document.getElementById('auth-code-group');
             if (codeGroup) codeGroup.hidden = false;
             document.getElementById('auth-code')?.focus();
-            this.setAuthStatus('Code gesendet. Öffne die Email und gib den 6-stelligen Code hier ein.');
+            this.setAuthStatus('Code gesendet. Öffne die Email und gib den 8-stelligen Code hier ein.');
         } catch (error) {
             this.setAuthStatus(error?.message || 'Anmeldecode konnte nicht gesendet werden.', true);
         } finally {
