@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 44086)
-Total output lines: 3924
-
 /**
  * FreshShift - Main Application
  * Manual scheduling with deviation tracking
@@ -1769,7 +1766,404 @@ const App = {
                 })() : '';
 
                 if (!actions && n.weekKey) {
-                   …4086 tokens truncated…            if (Number.isInteger(year) && Number.isInteger(week)) {
+                    const context = this.encodeActionData(JSON.stringify({ notificationId: n.id, weekKey: n.weekKey }));
+                    actions = `
+                        <div class="request-actions" style="margin-top: 8px; flex-direction: row;">
+                            <button class="btn btn-primary btn-small" onclick="App.openNotificationPlan('${context}')">Im Plan öffnen</button>
+                        </div>
+                    `;
+                } else if (!actions && ['absence_notice', 'absence_cancelled'].includes(n.type)) {
+                    const context = this.encodeActionData(JSON.stringify({ notificationId: n.id }));
+                    actions = `
+                        <div class="request-actions" style="margin-top: 8px; flex-direction: row;">
+                            <button class="btn btn-primary btn-small" onclick="App.openNotificationAbsences('${context}')">Abwesenheit prüfen</button>
+                        </div>
+                    `;
+                }
+
+                return `
+                    <div class="notification-item ${['early', 'late', 'shift_request_response', 'absence_request', 'absence_notice', 'absence_cancelled'].includes(n.type) ? n.type : 'info'}">
+                        <span class="notification-icon">${icon}</span>
+                        <div class="notification-content">
+                            <div class="notification-title">${titleName}${this.escapeHtml(n.message || '')}${n.storeId ? ` · ${this.escapeHtml(DataManager.getStoreName(n.storeId))}` : ''}</div>
+                            ${n.reason ? `<div class="notification-reason">${n.type === 'shift_request_response' ? 'Info' : 'Grund'}: ${this.escapeHtml(n.reason)}</div>` : ''}
+                            <div class="notification-time">${this.formatTimestamp(n.timestamp)}</div>
+                            ${actions}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        } else {
+            badge.style.display = 'none';
+            card.style.display = 'none';
+        }
+    },
+
+    // ===========================
+    // Admin Tabs
+    // ===========================
+    handleAdminTab(tab) {
+        const tabName = tab.dataset.tab;
+        
+        // Update tab active state
+        document.querySelectorAll('.tab-btn').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        
+        // Show corresponding content
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        document.getElementById(`${tabName}-tab`).classList.add('active');
+        
+        // Render content
+        if (tabName === 'month') {
+            this.renderMonthOverview();
+        } else if (tabName === 'employees') {
+            this.renderEmployeesTab();
+        } else if (tabName === 'planner') {
+            this.renderAdminView();
+        }
+    },
+
+    // ===========================
+    // Login / User Management
+    // ===========================
+    loadEmployeeDropdown() {
+        const select = document.getElementById('employee-select');
+        if (!select) return;
+        const employees = DataManager.getEmployees();
+
+        const storeOrder = ['fresh_fries', 'yes_fresh'];
+        const sorted = [...employees].sort((a, b) => {
+            const aStore = a.primaryStore || a.store || (a.stores?.[0]) || 'fresh_fries';
+            const bStore = b.primaryStore || b.store || (b.stores?.[0]) || 'fresh_fries';
+            const aIdx = storeOrder.indexOf(aStore);
+            const bIdx = storeOrder.indexOf(bStore);
+            if (aIdx !== bIdx) return aIdx - bIdx;
+            return String(a.name || '').localeCompare(String(b.name || ''), 'de');
+        });
+
+        select.innerHTML = '<option value="">-- Bitte wählen --</option>';
+
+        const groups = new Map();
+        sorted.forEach(emp => {
+            const primary = emp.primaryStore || emp.store || (emp.stores?.[0]) || 'fresh_fries';
+            if (!groups.has(primary)) groups.set(primary, []);
+            groups.get(primary).push(emp);
+        });
+
+        storeOrder.forEach(storeId => {
+            const emps = groups.get(storeId) || [];
+            if (emps.length === 0) return;
+
+            const group = document.createElement('optgroup');
+            group.label = DataManager.getStoreName(storeId);
+
+            emps.forEach(emp => {
+                const stores = Array.isArray(emp.stores) ? emp.stores : [emp.store || emp.primaryStore || storeId];
+                const storeNames = stores.map(s => DataManager.getStoreName(s));
+                const suffix = storeNames.length > 1 ? ` (${storeNames.join(' / ')})` : ` (${storeNames[0]})`;
+
+                const opt = document.createElement('option');
+                opt.value = emp.id;
+                opt.textContent = `${emp.name}${suffix}`;
+                group.appendChild(opt);
+            });
+
+            select.appendChild(group);
+        });
+    },
+
+    populateAdminStoreSelect() {
+        const select = document.getElementById('admin-store-select');
+        if (!select) return;
+
+        const storeIds = Object.keys(DataManager.STORES);
+        select.innerHTML = storeIds
+            .map(id => `<option value="${this.escapeHtml(id)}">${this.escapeHtml(DataManager.getStoreName(id))}</option>`)
+            .join('');
+
+        select.value = this.adminStore;
+    },
+
+    setAdminStore(storeId) {
+        this.adminStore = DataManager.normalizeStoreId(storeId);
+        localStorage.setItem('freshshift_admin_store', this.adminStore);
+
+        const select = document.getElementById('admin-store-select');
+        if (select) select.value = this.adminStore;
+
+        // Re-render current admin page
+        const active = document.querySelector('#admin-side-menu .menu-item.active');
+        const page = active?.dataset?.page || 'admin-dashboard';
+        this.navigateAdminTo(page);
+    },
+
+    setEmployeeStore(storeId, isSchedule = false) {
+        this.employeeStore = DataManager.normalizeStoreId(storeId);
+        localStorage.setItem('freshshift_employee_store', this.employeeStore);
+
+        const availSelect = document.getElementById('employee-store-select');
+        if (availSelect) availSelect.value = this.employeeStore;
+
+        const mySelect = document.getElementById('my-store-select');
+        if (mySelect) mySelect.value = this.employeeStore;
+
+        if (isSchedule) {
+            this.renderMyScheduleSection();
+        } else {
+            this.renderAvailabilityForm();
+        }
+    },
+
+    getUserStores() {
+        const u = this.currentUser;
+        if (!u) return ['fresh_fries'];
+        if (Array.isArray(u.stores) && u.stores.length > 0) return u.stores;
+        if (u.store) return [u.store];
+        return [u.primaryStore || 'fresh_fries'];
+    },
+
+    ensureEmployeeStoreSelectors(weekKey) {
+        const stores = this.getUserStores();
+
+        // Availability selector: show if user can work multiple stores
+        const availRow = document.getElementById('employee-store-row');
+        const availSelect = document.getElementById('employee-store-select');
+        if (availRow && availSelect) {
+            if (stores.length <= 1) {
+                availRow.style.display = 'none';
+            } else {
+                availRow.style.display = 'flex';
+                availSelect.innerHTML = stores.map(id => `<option value="${this.escapeHtml(id)}">${this.escapeHtml(DataManager.getStoreName(id))}</option>`).join('');
+                if (!stores.includes(this.employeeStore)) this.employeeStore = stores[0];
+                availSelect.value = this.employeeStore;
+            }
+        }
+
+        // Schedule selector: show only stores with shifts this week (plus primary)
+        const scheduleRow = document.getElementById('my-store-row');
+        const scheduleSelect = document.getElementById('my-store-select');
+        if (scheduleRow && scheduleSelect) {
+            const primary = this.currentUser?.primaryStore || stores[0];
+            const storesWithShifts = stores.filter(storeId => {
+                const schedule = DataManager.getScheduleForWeek(weekKey, storeId);
+                const has = DateUtils.DAY_KEYS.some(dayKey => (schedule?.shifts?.[dayKey] || []).some(s => s.employeeId === this.currentUser?.id));
+                return has;
+            });
+
+            const visibleStores = Array.from(new Set([primary, ...storesWithShifts])).filter(Boolean);
+
+            if (visibleStores.length <= 1) {
+                scheduleRow.style.display = 'none';
+            } else {
+                scheduleRow.style.display = 'flex';
+                scheduleSelect.innerHTML = visibleStores.map(id => `<option value="${this.escapeHtml(id)}">${this.escapeHtml(DataManager.getStoreName(id))}</option>`).join('');
+                if (!visibleStores.includes(this.employeeStore)) this.employeeStore = primary;
+                scheduleSelect.value = this.employeeStore;
+            }
+        }
+    },
+
+
+    async logout() {
+        this.currentUser = null;
+        try {
+            await window.FreshShiftSupabase.signOut();
+        } catch (error) {
+            this.showToast(error?.message || 'Abmelden fehlgeschlagen.', 'error');
+        }
+    },
+
+    async adminLogout() {
+        await this.logout();
+    },
+
+    resetLoginForm() {
+        const email = document.getElementById('auth-email');
+        if (email) email.value = '';
+        this.setAuthStatus('');
+    },
+
+    // ===========================
+    // Week Navigation
+    // ===========================
+    changeWeek(delta, isAdmin = false, isMySchedule = false) {
+        this.currentWeek.setDate(this.currentWeek.getDate() + (delta * 7));
+        this.updateWeekDisplay();
+        
+        if (isAdmin) {
+            this.renderAdminView();
+        } else if (isMySchedule) {
+            this.renderMyScheduleSection();
+        } else {
+            this.renderAvailabilityForm();
+        }
+    },
+
+    updateWeekDisplay() {
+        const display = DateUtils.formatWeekDisplay(this.currentWeek);
+        document.getElementById('week-display').textContent = display;
+        document.getElementById('admin-week-display').textContent = display;
+        document.getElementById('my-week-display').textContent = display;
+    },
+
+    // ===========================
+    // Month Navigation
+    // ===========================
+    changeMonth(delta) {
+        this.currentMonth.setMonth(this.currentMonth.getMonth() + delta);
+        this.updateMonthDisplay();
+        this.renderMonthOverview();
+    },
+
+    updateMonthDisplay() {
+        const months = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 
+                        'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+        const display = `${months[this.currentMonth.getMonth()]} ${this.currentMonth.getFullYear()}`;
+        document.getElementById('month-display').textContent = display;
+    },
+
+    // ===========================
+    // Report Late (Employee)
+    // ===========================
+    formatMinutesToTime(totalMinutes) {
+        const m = ((Math.round(totalMinutes) % 1440) + 1440) % 1440;
+        const hh = String(Math.floor(m / 60)).padStart(2, '0');
+        const mm = String(m % 60).padStart(2, '0');
+        return `${hh}:${mm}`;
+    },
+
+    async applyEmployeeShiftDeviation(kind, minutes, reason) {
+        if (!this.currentUser) return null;
+
+        const today = new Date();
+        const weekKey = DateUtils.getWeekKey(today);
+        const dayKey = DateUtils.getTodayKey();
+        const delta = parseInt(minutes, 10) || 0;
+
+        const stores = this.getUserStores();
+        for (const storeId of stores) {
+            const schedule = DataManager.getScheduleForWeek(weekKey, storeId);
+            const dayShifts = schedule?.shifts?.[dayKey] || [];
+            const shift = dayShifts.find(s => s.employeeId === this.currentUser.id);
+            if (!schedule || !shift) continue;
+
+            const plannedRange = this.timeRange(shift.start, shift.end);
+            if (!plannedRange) continue;
+            const plannedStart = plannedRange.start;
+            const plannedEnd = plannedRange.end;
+            const deviation = { ...(shift.deviation || {}) };
+            let actualStart = shift.actualStart || null;
+            let actualEnd = shift.actualEnd || null;
+
+            if (kind === 'late') {
+                const actualStartMin = Math.min(plannedStart + delta, plannedEnd);
+                actualStart = this.formatMinutesToTime(actualStartMin);
+                deviation.lateMinutes = actualStartMin - plannedStart;
+                if (reason) deviation.reason = reason;
+            }
+
+            if (kind === 'early') {
+                const actualEndMin = Math.max(plannedEnd - delta, plannedStart);
+                actualEnd = this.formatMinutesToTime(actualEndMin);
+                deviation.earlyMinutes = plannedEnd - actualEndMin;
+                if (reason) deviation.reason = reason;
+            }
+
+            await DataManager.reportShiftDeviation(shift.id, {
+                actualStart,
+                actualEnd,
+                deviation
+            });
+            return storeId;
+        }
+
+        return null;
+    },
+
+    async submitLateReport() {
+        if (!this.currentUser) {
+            this.showToast('Bitte melde dich zuerst an.', 'error');
+            return;
+        }
+
+        const minutes = parseInt(document.getElementById('late-minutes').value, 10) || 0;
+        const reason = document.getElementById('late-reason').value;
+
+        try {
+            const storeId = await this.applyEmployeeShiftDeviation('late', minutes, reason);
+            if (!storeId) {
+                this.showToast('Für heute wurde keine Schicht gefunden.', 'warning');
+                return;
+            }
+
+            this.hideModals();
+            document.getElementById('late-reason').value = '';
+            this.renderDashboard();
+            this.showToast('Meldung gesendet!', 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'Meldung konnte nicht gesendet werden.', 'error');
+        }
+    },
+
+    // ===========================
+    // Report Early Leave (Employee)
+    // ===========================
+    async submitEarlyReport() {
+        if (!this.currentUser) {
+            this.showToast('Bitte melde dich zuerst an.', 'error');
+            return;
+        }
+
+        const minutes = parseInt(document.getElementById('early-minutes').value, 10) || 0;
+        const reason = document.getElementById('early-reason').value;
+
+        try {
+            const storeId = await this.applyEmployeeShiftDeviation('early', minutes, reason);
+            if (!storeId) {
+                this.showToast('Für heute wurde keine Schicht gefunden.', 'warning');
+                return;
+            }
+
+            this.hideModals();
+            document.getElementById('early-reason').value = '';
+            this.renderDashboard();
+            this.showToast('Meldung gesendet!', 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'Meldung konnte nicht gesendet werden.', 'error');
+        }
+    },
+
+    // ===========================
+    // Notifications (Admin) - Updated for new structure
+    // ===========================
+    updateNotificationBadge() {
+        this.updateAdminNotifications();
+    },
+
+    renderNotificationsList(notifications) {
+        // This is now handled by updateAdminNotifications
+    },
+
+    formatTimestamp(timestamp) {
+        const date = new Date(timestamp);
+        return date.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) + 
+               ' Uhr, ' + date.toLocaleDateString('de-DE');
+    },
+
+    toggleNotifications() {
+        const card = document.getElementById('notifications-card');
+        this.navigateAdminTo('admin-dashboard');
+        this.updateAdminNotifications();
+        card.style.display = 'block';
+        window.setTimeout(() => card.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+    },
+
+    async openNotificationPlan(payload) {
+        try {
+            const { notificationId, weekKey } = JSON.parse(decodeURIComponent(payload));
+            if (notificationId) await DataManager.markNotificationRead(notificationId);
+            const [year, week] = String(weekKey || '').split('-W').map(Number);
+            if (Number.isInteger(year) && Number.isInteger(week)) {
                 this.currentWeek = DataManager.getDateFromWeek(year, week);
             }
             this.navigateAdminTo('admin-planner');
