@@ -29,7 +29,8 @@ test('login screen only exposes invited-email authentication', () => {
     assert.doesNotMatch(html, /id="employee-select"/);
     assert.match(html, /id="loading-screen" class="screen active"/);
     assert.doesNotMatch(html, /id="login-screen" class="screen active"/);
-    assert.match(serviceWorker, /freshshift-v14/);
+    assert.match(serviceWorker, /freshshift-v15/);
+    assert.match(serviceWorker, /fetch\(event\.request\)[\s\S]*caches\.match\(event\.request\)/);
     assert.match(html, /id="switch-to-admin-view"/);
     assert.match(html, /id="switch-to-employee-view"/);
 });
