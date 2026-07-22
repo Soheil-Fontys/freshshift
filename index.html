@@ -323,8 +323,16 @@
 
           <!-- Schedule Page -->
           <div id="page-schedule" class="page-content">
-            <div class="page-header">
+            <div class="page-header-with-action">
               <h3>Mein Schichtplan</h3>
+              <button
+                type="button"
+                id="download-team-pdf"
+                class="btn btn-secondary btn-small"
+                disabled
+              >
+                <span class="btn-icon-inline">⬇</span> Wochenplan als PDF
+              </button>
             </div>
             <div class="store-row" id="my-store-row" style="display: none">
               <label for="my-store-select" class="store-label">Geschäft</label>
@@ -1158,6 +1166,8 @@
         "sb_publishable_oIlen9vQLozQghcqGJTMjQ_W03bXXqX";
     </script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.7"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@4.2.1/dist/jspdf.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@5.0.8/dist/jspdf.plugin.autotable.min.js"></script>
     <script src="js/supabase.js"></script>
 
     <script src="js/data.js"></script>

@@ -2648,6 +2648,28 @@ body {
     box-shadow: var(--shadow-sm);
 }
 
+.availability-reset-header,
+.availability-reset-cell {
+    width: 7.5rem;
+    text-align: center;
+}
+
+.availability-reset-button {
+    width: 100%;
+    margin-top: var(--space-md);
+}
+
+@media (max-width: 480px) {
+    #page-schedule .page-header-with-action {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    #download-team-pdf {
+        width: 100%;
+    }
+}
+
 .availability-card-header {
     display: flex;
     justify-content: space-between;

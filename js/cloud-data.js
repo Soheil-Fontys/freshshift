@@ -447,6 +447,34 @@
             return mapped;
         },
 
+        async resetAvailability(employeeId, weekKey, storeId) {
+            requireAdmin();
+            const normalizedStoreId = this.normalizeStoreId(storeId);
+            unwrap(await requireClient().rpc('reset_employee_availability', {
+                p_employee_id: employeeId,
+                p_store_id: normalizedStoreId,
+                p_week_key: weekKey
+            }), 'Verfügbarkeit konnte nicht zurückgesetzt werden.');
+
+            cache.availabilities = cache.availabilities.filter(availability => !(
+                availability.employeeId === employeeId
+                && availability.weekKey === weekKey
+                && availability.storeId === normalizedStoreId
+            ));
+        },
+
+        async updateEmployeeEmail(employeeId, email, expectedEmail) {
+            requireAdmin();
+            const result = await window.FreshShiftSupabase.invoke('update-employee-email', {
+                employeeId,
+                email,
+                expectedEmail,
+                redirectTo: window.location.origin + window.location.pathname
+            });
+            await loadCloudData();
+            return result;
+        },
+
         getSchedules() {
             return cache.schedules;
         },
