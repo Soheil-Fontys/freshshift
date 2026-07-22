@@ -3,7 +3,7 @@
  * Enables offline functionality and caching
  */
 
-const CACHE_NAME = 'freshshift-v15';
+const CACHE_NAME = 'freshshift-v16';
 const STATIC_ASSETS = [
     './',
     './index.html',
@@ -114,6 +114,39 @@ self.addEventListener('fetch', (event) => {
                         : undefined
                 ))
             )
+    );
+});
+
+self.addEventListener('push', event => {
+    let payload = {};
+    try {
+        payload = event.data?.json() || {};
+    } catch {
+        payload = { body: event.data?.text() || 'Neue FreshShift-Mitteilung' };
+    }
+    const title = payload.title || 'FreshShift';
+    event.waitUntil(self.registration.showNotification(title, {
+        body: payload.body || 'Neue Mitteilung',
+        icon: './icons/pwa-icon-192.png',
+        badge: './icons/favicon-48.png',
+        tag: payload.tag || 'freshshift-notification',
+        renotify: true,
+        data: { url: payload.url || '/' }
+    }));
+});
+
+self.addEventListener('notificationclick', event => {
+    event.notification.close();
+    const targetUrl = new URL(event.notification.data?.url || '/', self.location.origin).href;
+    event.waitUntil(
+        clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windowClients => {
+            const existing = windowClients.find(client => client.url.startsWith(self.location.origin));
+            if (existing) {
+                existing.navigate(targetUrl);
+                return existing.focus();
+            }
+            return clients.openWindow(targetUrl);
+        })
     );
 });
 
