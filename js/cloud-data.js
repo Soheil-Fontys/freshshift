@@ -14,7 +14,11 @@
         schedules: [],
         absences: [],
         notifications: [],
-        activity: []
+        activity: [],
+        openShifts: [],
+        shiftSwaps: [],
+        shiftHistory: [],
+        pushSubscriptions: []
     });
 
     let cache = emptyCache();
@@ -52,9 +56,14 @@
             id: row.id,
             name: row.name,
             type: row.type,
-            hourlyRate: row.hourly_rate === null ? null : Number(row.hourly_rate),
+            hourlyRate: row.hourly_rate == null ? null : Number(row.hourly_rate),
+            weeklyTargetHours: row.weekly_target_hours == null ? null : Number(row.weekly_target_hours),
+            weeklyMaxHours: row.weekly_max_hours == null ? null : Number(row.weekly_max_hours),
             profileId: row.profile_id,
             email: row.email,
+            phone: row.phone_e164 || '',
+            smsOptIn: Boolean(row.sms_opt_in),
+            phoneConfirmedAt: row.phone_confirmed_at || null,
             active: row.active !== false,
             archivedAt: row.archived_at || null,
             terminatedAt: row.terminated_at || null,
@@ -254,8 +263,8 @@
         role = profile.role;
 
         const results = await Promise.all([
-            supabase.from('stores').select('id,name').order('name'),
-            supabase.from('employees').select('id,name,type,hourly_rate,profile_id,email,active,archived_at,terminated_at,terminated_by,default_availability_json').order('name'),
+            supabase.from('stores').select('id,name,minimum_staff,opening_time,closing_time').order('name'),
+            supabase.from('employees').select('id,name,type,hourly_rate,weekly_target_hours,weekly_max_hours,profile_id,email,phone_e164,sms_opt_in,phone_confirmed_at,active,archived_at,terminated_at,terminated_by,default_availability_json').order('name'),
             supabase.from('employee_stores').select('employee_id,store_id,is_primary'),
             supabase.from('availabilities').select('*'),
             supabase.from('schedules').select('*'),
@@ -264,10 +273,16 @@
             supabase.from('notifications').select('*').order('created_at', { ascending: false }),
             role === 'employee' ? supabase.rpc('get_released_team_shifts') : Promise.resolve({ data: [], error: null }),
             supabase.from('notification_reads').select('notification_id,read_at').eq('profile_id', user.id),
-            supabase.from('activity_log').select('*').order('created_at', { ascending: false }).limit(50)
+            supabase.from('activity_log').select('*').order('created_at', { ascending: false }).limit(50),
+            supabase.from('open_shifts').select('*').order('created_at', { ascending: false }),
+            supabase.from('shift_swap_requests').select('*').order('created_at', { ascending: false }),
+            role === 'admin'
+                ? supabase.from('shift_change_history').select('*').order('created_at', { ascending: false }).limit(100)
+                : Promise.resolve({ data: [], error: null }),
+            supabase.from('push_subscriptions').select('id,profile_id,endpoint,enabled,last_success_at')
         ]);
 
-        const [stores, employees, employeeStores, availabilities, schedules, shifts, absences, notifications, teamShifts, notificationReads, activity] =
+        const [stores, employees, employeeStores, availabilities, schedules, shifts, absences, notifications, teamShifts, notificationReads, activity, openShifts, shiftSwaps, shiftHistory, pushSubscriptions] =
             results.map((result, index) => unwrap(result, `Cloud-Daten konnten nicht geladen werden (${index + 1}).`) || []);
 
         const mappedEmployees = employees.map(row => mapEmployee(row, employeeStores));
@@ -284,10 +299,56 @@
             schedules: mapSchedules(schedules, allShiftRows, mappedEmployees),
             absences: absences.map(mapAbsence),
             notifications: notifications.map(row => mapNotification(row, adminReadIds)),
-            activity: activity.map(mapActivity)
+            activity: activity.map(mapActivity),
+            openShifts: openShifts.map(row => ({
+                id: row.id,
+                scheduleId: row.schedule_id,
+                originalEmployeeId: row.original_employee_id,
+                storeId: row.store_id,
+                weekKey: row.week_key,
+                dayKey: row.day_key,
+                start: row.start,
+                end: row.end,
+                reason: row.reason,
+                status: row.status,
+                claimedByEmployeeId: row.claimed_by_employee_id,
+                claimedAt: row.claimed_at,
+                createdAt: row.created_at
+            })),
+            shiftSwaps: shiftSwaps.map(row => ({
+                id: row.id,
+                shiftId: row.shift_id,
+                storeId: row.store_id,
+                weekKey: row.week_key,
+                dayKey: row.day_key,
+                requestedByEmployeeId: row.requested_by_employee_id,
+                claimedByEmployeeId: row.claimed_by_employee_id,
+                status: row.status,
+                reason: row.reason,
+                adminNote: row.admin_note,
+                createdAt: row.created_at
+            })),
+            shiftHistory: shiftHistory.map(row => ({
+                id: row.id,
+                scheduleId: row.schedule_id,
+                shiftId: row.shift_id,
+                storeId: row.store_id,
+                weekKey: row.week_key,
+                dayKey: row.day_key,
+                employeeId: row.employee_id,
+                employeeName: row.employee_name,
+                changeType: row.change_type,
+                before: row.before_json,
+                after: row.after_json,
+                createdAt: row.created_at
+            })),
+            pushSubscriptions
         };
 
         currentEmployee = cache.employees.find(employee => employee.profileId === user.id && employee.active) || null;
+        if (role === 'admin') {
+            window.setTimeout(() => DataManager.dispatchNotifications?.(), 0);
+        }
         return { role, profile, user, employee: currentEmployee };
     }
 
@@ -312,6 +373,31 @@
 
         getAuthContext() {
             return { role, profile, user: authUser, employee: currentEmployee };
+        },
+
+        getStores() {
+            return cache.stores;
+        },
+
+        getStore(id) {
+            return cache.stores.find(store => store.id === id) || null;
+        },
+
+        getStoreName(id) {
+            return cache.stores.find(store => store.id === id)?.name || id;
+        },
+
+        async saveStorePlanningSettings(storeId, settings) {
+            requireAdmin();
+            const saved = unwrap(await requireClient().from('stores').update({
+                minimum_staff: settings.minimumStaff,
+                opening_time: settings.openingTime,
+                closing_time: settings.closingTime
+            }).eq('id', this.normalizeStoreId(storeId))
+                .select('id,name,minimum_staff,opening_time,closing_time').single(),
+            'Besetzungsregeln konnten nicht gespeichert werden.');
+            replaceById(cache.stores, saved);
+            return saved;
         },
 
         getEmployees(options = {}) {
@@ -339,14 +425,17 @@
             const stores = Array.from(new Set(employee.stores || [employee.primaryStore])).filter(Boolean);
             const primaryStore = employee.primaryStore || stores[0];
 
-            const savedId = unwrap(await supabase.rpc('save_employee', {
+            const savedId = unwrap(await supabase.rpc('save_employee_v2', {
                 p_employee_id: null,
                 p_name: employee.name,
                 p_type: employee.type,
                 p_hourly_rate: employee.hourlyRate,
                 p_default_availability: employee.defaultAvailability || {},
                 p_store_ids: stores,
-                p_primary_store: primaryStore
+                p_primary_store: primaryStore,
+                p_phone_e164: employee.phone || null,
+                p_weekly_target_hours: employee.weeklyTargetHours,
+                p_weekly_max_hours: employee.weeklyMaxHours
             }), 'Mitarbeiter konnte nicht angelegt werden.');
 
             const [employeeResult, linksResult] = await Promise.all([
@@ -371,14 +460,17 @@
             const stores = Array.from(new Set(merged.stores || [merged.primaryStore])).filter(Boolean);
             const primaryStore = merged.primaryStore || stores[0];
 
-            const savedId = unwrap(await supabase.rpc('save_employee', {
+            const savedId = unwrap(await supabase.rpc('save_employee_v2', {
                 p_employee_id: merged.id,
                 p_name: merged.name,
                 p_type: merged.type,
                 p_hourly_rate: merged.hourlyRate,
                 p_default_availability: merged.defaultAvailability || {},
                 p_store_ids: stores,
-                p_primary_store: primaryStore
+                p_primary_store: primaryStore,
+                p_phone_e164: merged.phone || null,
+                p_weekly_target_hours: merged.weeklyTargetHours,
+                p_weekly_max_hours: merged.weeklyMaxHours
             }), 'Mitarbeiter konnte nicht gespeichert werden.');
 
             const [employeeResult, linksResult] = await Promise.all([
@@ -475,6 +567,64 @@
             return result;
         },
 
+        async saveMyNotificationSettings(phone, smsOptIn) {
+            if (!currentEmployee) throw new Error('Aktiver Mitarbeiterzugang erforderlich.');
+            unwrap(await requireClient().rpc('save_my_notification_settings', {
+                p_phone_e164: phone || null,
+                p_sms_opt_in: Boolean(smsOptIn)
+            }), 'Benachrichtigungseinstellungen konnten nicht gespeichert werden.');
+            await loadCloudData();
+            return currentEmployee;
+        },
+
+        getPushSubscriptions() {
+            return cache.pushSubscriptions;
+        },
+
+        async savePushSubscription(subscription) {
+            if (!authUser) throw new Error('Anmeldung erforderlich.');
+            const json = subscription.toJSON ? subscription.toJSON() : subscription;
+            const saved = unwrap(await requireClient().from('push_subscriptions').upsert({
+                profile_id: authUser.id,
+                endpoint: json.endpoint,
+                p256dh: json.keys?.p256dh,
+                auth: json.keys?.auth,
+                user_agent: navigator.userAgent,
+                enabled: true
+            }, { onConflict: 'endpoint' }).select('id,profile_id,endpoint,enabled,last_success_at').single(),
+            'Push-Benachrichtigungen konnten nicht gespeichert werden.');
+            replaceById(cache.pushSubscriptions, saved);
+            return saved;
+        },
+
+        async removePushSubscription(endpoint) {
+            if (!endpoint) return;
+            unwrap(await requireClient().from('push_subscriptions').delete().eq('endpoint', endpoint),
+                'Push-Benachrichtigungen konnten nicht deaktiviert werden.');
+            cache.pushSubscriptions = cache.pushSubscriptions.filter(item => item.endpoint !== endpoint);
+        },
+
+        async dispatchNotifications() {
+            if (role !== 'admin') return null;
+            try {
+                return await window.FreshShiftSupabase.invoke('dispatch-notifications', {});
+            } catch (error) {
+                console.warn('Notification dispatch postponed', error);
+                return null;
+            }
+        },
+
+        async sendAvailabilityReminder(employeeId, storeId, weekKey) {
+            requireAdmin();
+            const id = unwrap(await requireClient().rpc('send_availability_reminder', {
+                p_employee_id: employeeId,
+                p_store_id: this.normalizeStoreId(storeId),
+                p_week_key: weekKey
+            }), 'Erinnerung konnte nicht gesendet werden.');
+            await this.dispatchNotifications();
+            return id;
+        },
+
         getSchedules() {
             return cache.schedules;
         },
@@ -523,7 +673,91 @@
                 existing.savedAt = row.saved_at;
                 existing.version = Number(row.version || existing.version || 1);
             }
+            await this.dispatchNotifications();
             return existing || null;
+        },
+
+        getOpenShifts() {
+            return cache.openShifts;
+        },
+
+        getShiftSwaps() {
+            return cache.shiftSwaps;
+        },
+
+        getShiftHistory() {
+            return cache.shiftHistory;
+        },
+
+        async createShiftSwap(shiftId, reason) {
+            const id = unwrap(await requireClient().rpc('create_shift_swap_request', {
+                p_shift_id: shiftId,
+                p_reason: reason || null
+            }), 'Tauschanfrage konnte nicht erstellt werden.');
+            await loadCloudData();
+            await this.dispatchNotifications();
+            return id;
+        },
+
+        async claimShiftSwap(requestId) {
+            const id = unwrap(await requireClient().rpc('claim_shift_swap', {
+                p_request_id: requestId
+            }), 'Tauschanfrage konnte nicht übernommen werden.');
+            await loadCloudData();
+            await this.dispatchNotifications();
+            return id;
+        },
+
+        async cancelShiftSwap(requestId) {
+            const id = unwrap(await requireClient().rpc('cancel_shift_swap', {
+                p_request_id: requestId
+            }), 'Tauschanfrage konnte nicht storniert werden.');
+            await loadCloudData();
+            return id;
+        },
+
+        async reviewShiftSwap(requestId, approve, note) {
+            requireAdmin();
+            const id = unwrap(await requireClient().rpc('review_shift_swap', {
+                p_request_id: requestId,
+                p_approve: Boolean(approve),
+                p_note: note || null
+            }), 'Tauschanfrage konnte nicht bearbeitet werden.');
+            await loadCloudData();
+            await this.dispatchNotifications();
+            return id;
+        },
+
+        async createOpenShift(shiftId, reason) {
+            requireAdmin();
+            const id = unwrap(await requireClient().rpc('create_open_shift', {
+                p_shift_id: shiftId,
+                p_reason: reason || null
+            }), 'Schicht konnte nicht geöffnet werden.');
+            await loadCloudData();
+            await this.dispatchNotifications();
+            return id;
+        },
+
+        async claimOpenShift(openShiftId) {
+            const id = unwrap(await requireClient().rpc('claim_open_shift', {
+                p_open_shift_id: openShiftId
+            }), 'Offene Schicht konnte nicht übernommen werden.');
+            await loadCloudData();
+            await this.dispatchNotifications();
+            return id;
+        },
+
+        async reviewOpenShift(openShiftId, approve, note) {
+            requireAdmin();
+            const id = unwrap(await requireClient().rpc('review_open_shift', {
+                p_open_shift_id: openShiftId,
+                p_approve: Boolean(approve),
+                p_note: note || null
+            }), 'Offene Schicht konnte nicht bearbeitet werden.');
+            await loadCloudData();
+            await this.dispatchNotifications();
+            return id;
         },
 
         async respondToShiftRequest(shiftId, status, reason) {
@@ -672,6 +906,7 @@
                 .single(), 'Meldung konnte nicht gesendet werden.');
             const mapped = mapNotification(saved);
             cache.notifications.unshift(mapped);
+            await this.dispatchNotifications();
             return mapped;
         },
 
