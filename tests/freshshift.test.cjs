@@ -87,7 +87,7 @@ test('magic-link login cannot create uninvited users', async () => {
     assert.equal(otpRequest.options.emailRedirectTo, 'http://localhost:3000/');
 });
 
-test('email code login verifies a six-digit OTP inside the current app', async () => {
+test('email code login verifies an eight-digit OTP inside the current app', async () => {
     let verification = null;
     const fakeClient = {
         auth: {
@@ -105,9 +105,9 @@ test('email code login verifies a six-digit OTP inside the current app', async (
     const context = vm.createContext({ window, console });
     vm.runInContext(fs.readFileSync(path.join(root, 'js/supabase.js'), 'utf8'), context);
 
-    await window.FreshShiftSupabase.verifyEmailCode(' USER@EXAMPLE.COM ', ' 123456 ');
+    await window.FreshShiftSupabase.verifyEmailCode(' USER@EXAMPLE.COM ', ' 12345678 ');
     assert.equal(verification.email, 'user@example.com');
-    assert.equal(verification.token, '123456');
+    assert.equal(verification.token, '12345678');
     assert.equal(verification.type, 'email');
 });
 
