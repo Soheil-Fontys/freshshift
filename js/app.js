@@ -220,7 +220,7 @@ const App = {
         });
         document.getElementById('auth-verify-code').addEventListener('click', () => this.verifyAuthCode());
         document.getElementById('auth-code').addEventListener('input', event => {
-            event.target.value = event.target.value.replace(/\D/g, '').slice(0, 6);
+            event.target.value = event.target.value.replace(/\D/g, '').slice(0, 8);
         });
         document.getElementById('auth-code').addEventListener('keypress', event => {
             if (event.key === 'Enter') this.verifyAuthCode();

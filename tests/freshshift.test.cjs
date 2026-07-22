@@ -8,16 +8,20 @@ const root = path.resolve(__dirname, '..');
 
 test('login screen only exposes invited-email authentication', () => {
     const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+    const app = fs.readFileSync(path.join(root, 'js/app.js'), 'utf8');
     const serviceWorker = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
 
     assert.match(html, /id="auth-email"/);
     assert.match(html, /id="auth-send-link"/);
     assert.match(html, /id="auth-code"/);
+    assert.match(html, /maxlength="8"/);
+    assert.match(html, /pattern="\[0-9\]\{8\}"/);
     assert.match(html, /id="auth-verify-code"/);
     assert.match(html, /js\/cloud-data\.js/);
     assert.match(html, /id="team-schedule-content"/);
     assert.match(html, /id="admin-activity-list"/);
     assert.match(html, /id="download-team-pdf"/);
+    assert.match(app, /replace\(\/\\D\/g, ''\)\.slice\(0, 8\)/);
     assert.match(html, /jspdf@4\.2\.1/);
     assert.match(html, /jspdf-autotable@5\.0\.8/);
     assert.match(html, /<button\s+type="button"\s+id="notification-badge"/);
