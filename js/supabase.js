@@ -68,7 +68,7 @@
         const normalizedEmail = String(email || '').trim().toLowerCase();
         const normalizedToken = String(token || '').replace(/\s+/g, '');
         if (!normalizedEmail) throw new Error('Bitte eine Email-Adresse eingeben.');
-        if (!/^\d{6}$/.test(normalizedToken)) throw new Error('Bitte den 6-stelligen Code eingeben.');
+        if (!/^\d{8}$/.test(normalizedToken)) throw new Error('Bitte den 8-stelligen Code eingeben.');
 
         const { data, error } = await ensureClient().auth.verifyOtp({
             email: normalizedEmail,
