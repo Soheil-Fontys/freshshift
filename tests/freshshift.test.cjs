@@ -25,7 +25,19 @@ test('login screen only exposes invited-email authentication', () => {
     assert.doesNotMatch(html, /id="employee-select"/);
     assert.match(html, /id="loading-screen" class="screen active"/);
     assert.doesNotMatch(html, /id="login-screen" class="screen active"/);
-    assert.match(serviceWorker, /freshshift-v13/);
+    assert.match(serviceWorker, /freshshift-v14/);
+    assert.match(html, /id="switch-to-admin-view"/);
+    assert.match(html, /id="switch-to-employee-view"/);
+});
+
+test('dual-role admins can switch views without signing out or changing roles', () => {
+    const appSource = fs.readFileSync(path.join(root, 'js/app.js'), 'utf8');
+    const cloudSource = fs.readFileSync(path.join(root, 'js/cloud-data.js'), 'utf8');
+
+    assert.match(appSource, /freshshift_view_mode/);
+    assert.match(appSource, /context\?\.role !== 'admin' \|\| !context\?\.employee/);
+    assert.match(appSource, /showScreen\(view === 'employee' \? 'dashboard-screen' : 'admin-screen'\)/);
+    assert.doesNotMatch(cloudSource, /role !== 'employee' \|\| !currentEmployee/);
 });
 
 test('ISO week keys use the ISO week-year at New Year', () => {

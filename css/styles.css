@@ -64,6 +64,14 @@ body {
     line-height: 1.5;
 }
 
+.view-switch-button {
+    margin-bottom: var(--space-sm);
+}
+
+.view-switch-button[hidden] {
+    display: none;
+}
+
 
 #app {
     min-height: 100vh;

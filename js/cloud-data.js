@@ -624,7 +624,7 @@
         },
 
         async cancelOwnAbsence(id) {
-            if (role !== 'employee' || !currentEmployee) {
+            if (!currentEmployee) {
                 throw new Error('Nur Mitarbeiter können ihre eigene Abwesenheit stornieren.');
             }
             unwrap(await requireClient().rpc('cancel_own_absence', {
