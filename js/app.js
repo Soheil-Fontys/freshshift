@@ -2163,7 +2163,8 @@ const App = {
     },
 
     async reviewWorkflow(kind, id, approve) {
-        const note = approve ? '' : (prompt('Grund für die Ablehnung (optional)', '') ?? null);
+        const enteredNote = approve ? '' : (prompt('Grund für die Ablehnung (optional)', '') ?? null);
+        const note = enteredNote === null ? null : enteredNote.trim().slice(0, 1000);
         if (!approve && note === null) return;
         try {
             if (kind === 'open') await DataManager.reviewOpenShift(id, approve, note);

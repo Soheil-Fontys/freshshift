@@ -11,7 +11,11 @@ Shift planning for Yes Fresh and Fresh Fries. Employees submit their weekly avai
 - **Personal Schedule View**: Each employee can view their assigned shifts after release
 - **Employee Lifecycle**: Archive former employees without losing historic schedules or monthly totals
 - **Automatic Refresh**: Visible dashboards refresh safely when returning to the app and during longer sessions
-- **Passwordless Login**: Invited employees and admins authenticate with Supabase Magic Links
+- **Plan Change Requests**: Employees can request a different time for an already released shift; admins approve or reject the request
+- **Shift Coverage Workflows**: Open shifts and swap requests replace ad-hoc replacement coordination
+- **Private Calendar Subscription**: Employees can subscribe to their own released shifts with a revocable, token-protected calendar link
+- **Web Push Notifications**: Opted-in devices receive planning updates without SMS
+- **Passwordless Login**: Invited employees and admins authenticate with an eight-digit email code
 - **Responsive Design**: Works on desktop and mobile devices
 
 ## Quick Start
@@ -19,7 +23,7 @@ Shift planning for Yes Fresh and Fresh Fries. Employees submit their weekly avai
 1. Start a static web server, for example `python3 -m http.server 3000`
 2. Open `http://localhost:3000`
 3. Enter the email address of an invited FreshShift account
-4. Open the Magic Link and use the role-specific employee or admin view
+4. Enter the eight-digit code from the email and use the role-specific employee or admin view
 
 ## Project Structure
 
@@ -31,7 +35,7 @@ freshshift/
 ├── js/
 │   ├── data.js         # Data selectors and date utilities
 │   ├── cloud-data.js   # RLS-backed Supabase data adapter
-│   ├── supabase.js     # Passwordless Auth client
+│   ├── supabase.js     # Passwordless email-code Auth client
 │   └── app.js          # Main application logic
 ├── supabase/
 │   ├── functions/      # Authenticated server-side functions
@@ -58,6 +62,6 @@ Before deploying a new domain, add its URL to the Supabase Auth Site URL and Red
 ## Production Checklist
 
 - Invite each active employee from the employee management page
-- Confirm each employee can open their Magic Link and see only their own data
+- Confirm each employee can use their email code and see only their own data
 - Prepare a pilot week, resolve every shift request, and release the plan
 - Review the month overview after the first completed week
