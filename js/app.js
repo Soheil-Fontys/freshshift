@@ -516,7 +516,14 @@ const App = {
 
     updateAvailWeekDisplay() {
         const display = DateUtils.formatWeekDisplay(this.availWeek);
-        document.getElementById('avail-week-display').textContent = display;
+        const label = document.getElementById('avail-week-label');
+        const contextBadge = document.getElementById('avail-week-context');
+        if (!label || !contextBadge) return;
+
+        const context = this.getWeekContext(this.availWeek);
+        label.textContent = display;
+        contextBadge.textContent = context.label;
+        contextBadge.className = `week-context-badge ${context.kind}`;
     },
 
     renderAdminAvailability() {
@@ -2463,29 +2470,34 @@ const App = {
 
     updateWeekDisplay() {
         const display = DateUtils.formatWeekDisplay(this.currentWeek);
-        document.getElementById('week-display').textContent = display;
-        const adminWeekLabel = document.getElementById('admin-week-label');
-        const adminWeekContext = document.getElementById('admin-week-context');
-        if (adminWeekLabel && adminWeekContext) {
-            const currentWeekKey = DateUtils.getWeekKey(new Date());
-            const displayedWeekKey = DateUtils.getWeekKey(this.currentWeek);
-            const differenceInWeeks = Math.round(
-                (DateUtils.getWeekDates(this.currentWeek)[0] - DateUtils.getWeekDates(new Date())[0]) / (7 * 24 * 60 * 60 * 1000)
-            );
-            const context = displayedWeekKey === currentWeekKey
-                ? ['Aktuelle Woche', 'current']
-                : differenceInWeeks === -1
-                    ? ['Letzte Woche', 'past']
-                    : differenceInWeeks === 1
-                        ? ['Nächste Woche', 'future']
-                        : differenceInWeeks < 0
-                            ? ['Vergangene Woche', 'past']
-                            : ['Kommende Woche', 'future'];
-            adminWeekLabel.textContent = display;
-            adminWeekContext.textContent = context[0];
-            adminWeekContext.className = `week-context-badge ${context[1]}`;
-        }
-        document.getElementById('my-week-display').textContent = display;
+        const context = this.getWeekContext(this.currentWeek);
+        this.updateWeekContextDisplay('week-label', 'week-context', display, context);
+        this.updateWeekContextDisplay('my-week-label', 'my-week-context', display, context);
+        this.updateWeekContextDisplay('admin-week-label', 'admin-week-context', display, context);
+    },
+
+    updateWeekContextDisplay(labelId, contextId, display, context) {
+        const label = document.getElementById(labelId);
+        const contextBadge = document.getElementById(contextId);
+        if (!label || !contextBadge) return;
+
+        label.textContent = display;
+        contextBadge.textContent = context.label;
+        contextBadge.className = `week-context-badge ${context.kind}`;
+    },
+
+    getWeekContext(weekDate) {
+        const currentWeekKey = DateUtils.getWeekKey(new Date());
+        const displayedWeekKey = DateUtils.getWeekKey(weekDate);
+        const differenceInWeeks = Math.round(
+            (DateUtils.getWeekDates(weekDate)[0] - DateUtils.getWeekDates(new Date())[0]) / (7 * 24 * 60 * 60 * 1000)
+        );
+        if (displayedWeekKey === currentWeekKey) return { label: 'Aktuelle Woche', kind: 'current' };
+        if (differenceInWeeks === -1) return { label: 'Letzte Woche', kind: 'past' };
+        if (differenceInWeeks === 1) return { label: 'Nächste Woche', kind: 'future' };
+        return differenceInWeeks < 0
+            ? { label: 'Vergangene Woche', kind: 'past' }
+            : { label: 'Kommende Woche', kind: 'future' };
     },
 
     // ===========================
@@ -3029,47 +3041,38 @@ const App = {
             .map(row => [row.name, ...row.days]);
     },
 
-    downloadEmployeeSchedulePdf() {
-        const weekKey = DateUtils.getWeekKey(this.currentWeek);
-        const schedule = DataManager.getScheduleForWeek(weekKey, this.employeeStore);
-        if (!schedule?.released) {
-            this.showToast('Für diese Woche ist noch kein freigegebener Plan verfügbar.', 'error');
-            return;
-        }
-
+    createWeeklySchedulePdf(schedule, storeId) {
         const JsPdf = window.jspdf?.jsPDF;
         if (!JsPdf) {
-            this.showToast('PDF-Modul konnte nicht geladen werden. Bitte prüfe die Internetverbindung.', 'error');
-            return;
+            throw new Error('PDF-Modul konnte nicht geladen werden. Bitte prüfe die Internetverbindung.');
         }
 
-        try {
-            const doc = new JsPdf({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-            if (typeof doc.autoTable !== 'function') {
-                throw new Error('PDF table module unavailable');
-            }
+        const doc = new JsPdf({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+        if (typeof doc.autoTable !== 'function') {
+            throw new Error('PDF table module unavailable');
+        }
 
-            const storeName = DataManager.getStoreName(this.employeeStore);
-            const rows = this.buildWeeklyPdfRows(schedule);
-            const dates = DateUtils.getWeekDates(this.currentWeek);
-            const headers = ['Mitarbeiter', ...DateUtils.DAYS_SHORT.map((day, index) =>
-                `${day}\n${DateUtils.formatDate(dates[index])}`)];
+        const storeName = DataManager.getStoreName(storeId);
+        const rows = this.buildWeeklyPdfRows(schedule);
+        const dates = DateUtils.getWeekDates(this.currentWeek);
+        const headers = ['Mitarbeiter', ...DateUtils.DAYS_SHORT.map((day, index) =>
+            `${day}\n${DateUtils.formatDate(dates[index])}`)];
 
-            doc.setProperties({
-                title: `FreshShift ${DateUtils.formatWeekDisplay(this.currentWeek)} - ${storeName}`,
-                subject: 'Freigegebener Wochenplan',
-                creator: 'FreshShift'
-            });
-            doc.setFont('helvetica', 'bold');
-            doc.setFontSize(16);
-            doc.setTextColor(11, 95, 165);
-            doc.text('FreshShift - Wochenplan', 8, 12);
-            doc.setFont('helvetica', 'normal');
-            doc.setFontSize(9);
-            doc.setTextColor(75, 85, 99);
-            doc.text(`${DateUtils.formatWeekDisplay(this.currentWeek)} | ${storeName}`, 8, 18);
+        doc.setProperties({
+            title: `FreshShift ${DateUtils.formatWeekDisplay(this.currentWeek)} - ${storeName}`,
+            subject: 'Wochenplan',
+            creator: 'FreshShift'
+        });
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(16);
+        doc.setTextColor(11, 95, 165);
+        doc.text('FreshShift - Wochenplan', 8, 12);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.setTextColor(75, 85, 99);
+        doc.text(`${DateUtils.formatWeekDisplay(this.currentWeek)} | ${storeName}`, 8, 18);
 
-            doc.autoTable({
+        doc.autoTable({
                 startY: 23,
                 head: [headers],
                 body: rows.length > 0 ? rows : [['Keine Schichten', '–', '–', '–', '–', '–', '–', '–']],
@@ -3111,12 +3114,50 @@ const App = {
                     doc.setTextColor(107, 114, 128);
                     doc.text(`FreshShift | Seite ${pageNumber}`, data.settings.margin.left, 205);
                 }
-            });
+        });
 
+        return { doc, storeName };
+    },
+
+    downloadEmployeeSchedulePdf() {
+        const weekKey = DateUtils.getWeekKey(this.currentWeek);
+        const schedule = DataManager.getScheduleForWeek(weekKey, this.employeeStore);
+        if (!schedule?.released) {
+            this.showToast('Für diese Woche ist noch kein freigegebener Plan verfügbar.', 'error');
+            return;
+        }
+
+        try {
+            const { doc, storeName } = this.createWeeklySchedulePdf(schedule, this.employeeStore);
             const safeStore = String(storeName || 'Wochenplan').replace(/[^a-zA-Z0-9äöüÄÖÜß_-]+/g, '-');
             doc.save(`FreshShift_${weekKey}_${safeStore}.pdf`);
         } catch (error) {
             console.error('FreshShift PDF generation failed', error);
+            this.showToast('PDF konnte nicht erstellt werden.', 'error');
+        }
+    },
+
+    previewAdminSchedulePdf() {
+        const weekKey = DateUtils.getWeekKey(this.currentWeek);
+        const schedule = DataManager.getScheduleForWeek(weekKey, this.adminStore);
+        if (!schedule) {
+            this.showToast('Für diese Woche ist noch kein Wochenplan vorhanden.', 'error');
+            return;
+        }
+
+        const previewWindow = window.open('', '_blank');
+        try {
+            const { doc } = this.createWeeklySchedulePdf(schedule, this.adminStore);
+            const url = doc.output('bloburl');
+            if (previewWindow) {
+                previewWindow.location.href = url;
+                window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+            } else {
+                doc.save(`FreshShift_${weekKey}_${this.adminStore}.pdf`);
+            }
+        } catch (error) {
+            previewWindow?.close();
+            console.error('FreshShift admin PDF preview failed', error);
             this.showToast('PDF konnte nicht erstellt werden.', 'error');
         }
     },
@@ -3242,11 +3283,7 @@ const App = {
     },
 
     printSchedule() {
-        const printWeek = document.getElementById('print-week');
-        if (printWeek) {
-            printWeek.textContent = `${DateUtils.formatWeekDisplay(this.currentWeek)} · ${DataManager.getStoreName(this.adminStore)}`;
-        }
-        window.print();
+        this.previewAdminSchedulePdf();
     },
  
     renderWeekDeviations() {
