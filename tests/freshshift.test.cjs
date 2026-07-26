@@ -29,8 +29,14 @@ test('login screen only exposes invited-email authentication', () => {
     assert.doesNotMatch(html, /id="employee-select"/);
     assert.match(html, /id="loading-screen" class="screen active"/);
     assert.doesNotMatch(html, /id="login-screen" class="screen active"/);
-    assert.match(serviceWorker, /freshshift-v17/);
+    assert.match(serviceWorker, /freshshift-v18/);
+    assert.match(serviceWorker, /Failed to cache:[\s\S]*throw error/);
     assert.match(serviceWorker, /fetch\(event\.request\)[\s\S]*caches\.match\(event\.request\)/);
+    assert.match(html, /addEventListener\("controllerchange"/);
+    assert.doesNotMatch(
+        html,
+        /postMessage\(\{ type: "SKIP_WAITING" \}\);\s*window\.location\.reload/
+    );
     assert.match(html, /id="switch-to-admin-view"/);
     assert.match(html, /id="switch-to-employee-view"/);
 });
@@ -65,7 +71,7 @@ test('ISO week keys use the ISO week-year at New Year', () => {
     assert.equal(vm.runInContext("DateUtils.calculateDuration('22:00', '02:00')", context), 4);
 });
 
-test('magic-link login cannot create uninvited users', async () => {
+test('email-code login cannot create uninvited users', async () => {
     let otpRequest = null;
     const fakeClient = {
         auth: {
@@ -472,6 +478,30 @@ test('plan changes and private calendar subscriptions stay scoped to the employe
     assert.match(calendarFunction, /UID:\$\{shift\.schedule_id\}-\$\{shift\.day_key\}@freshshift\.de/);
     assert.match(migration, /create or replace function public\.get_calendar_feed/);
     assert.match(config, /\[functions\.calendar-feed\]\s+verify_jwt = false/);
+});
+
+test('production audit hardens profile roles, plan-change inputs, modals and calendar crypto', () => {
+    const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+    const css = fs.readFileSync(path.join(root, 'css/styles.css'), 'utf8');
+    const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
+    const migration = fs.readFileSync(
+        path.join(root, 'supabase/migrations/20260726191136_production_audit_hardening.sql'),
+        'utf8'
+    );
+
+    assert.match(css, /\.modal-content\s*\{[\s\S]*display: flex;[\s\S]*overflow: hidden;/);
+    assert.match(css, /\.modal-body\s*\{[\s\S]*overflow-y: auto;/);
+    assert.match(css, /@media \(max-width: 640px\)[\s\S]*\.modal-footer,[\s\S]*grid-template-columns: repeat\(2,/);
+    assert.match(migration, /revoke insert, update, delete, truncate, references, trigger[\s\S]*public\.profiles/);
+    assert.match(migration, /grant update \(display_name\) on public\.profiles to authenticated/);
+    assert.match(migration, /shift_change_requests_reviewed_by_idx/);
+    assert.match(migration, /shift_change_requests_shift_id_idx/);
+    assert.match(migration, /\^\(\[01\]\[0-9\]\|2\[0-3\]\):\[0-5\]\[0-9\]\$/);
+    assert.match(migration, /extensions\.gen_random_bytes/);
+    assert.match(migration, /extensions\.digest/);
+    assert.match(html, /maxlength="1000"/);
+    assert.match(readme, /eight-digit email code/);
+    assert.doesNotMatch(readme, /Magic Link/);
 });
 
 test('production hardening preserves history and separates save from release', () => {

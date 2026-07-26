@@ -3,7 +3,7 @@
  * Enables offline functionality and caching
  */
 
-const CACHE_NAME = 'freshshift-v17';
+const CACHE_NAME = 'freshshift-v18';
 const STATIC_ASSETS = [
     './',
     './index.html',
@@ -37,10 +37,10 @@ self.addEventListener('install', (event) => {
             })
             .then(() => {
                 console.log('[SW] Static assets cached');
-                return self.skipWaiting();
             })
             .catch((error) => {
                 console.error('[SW] Failed to cache:', error);
+                throw error;
             })
     );
 });
