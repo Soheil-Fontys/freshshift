@@ -401,6 +401,10 @@ test('planning and notification release is wired end to end', () => {
         path.join(root, 'supabase/migrations/20260726210000_fix_shift_swap_date_permission.sql'),
         'utf8'
     );
+    const shiftSwapInsertMigration = fs.readFileSync(
+        path.join(root, 'supabase/migrations/20260726221500_allow_safe_shift_swap_request_inserts.sql'),
+        'utf8'
+    );
     const migration = fs.readFileSync(
         path.join(root, 'supabase/migrations/20260722222119_notification_and_planning_release.sql'),
         'utf8'
@@ -414,6 +418,11 @@ test('planning and notification release is wired end to end', () => {
     assert.match(html, /id="page-open-shifts"/);
     assert.match(html, /id="admin-workflow-list"/);
     assert.match(html, /id="page-admin-history"/);
+    for (const id of ['week-context', 'my-week-context', 'admin-week-context', 'avail-week-context']) {
+        assert.match(html, new RegExp(`id="${id}"`));
+    }
+    assert.match(app, /updateWeekContextDisplay/);
+    assert.match(app, /getWeekContext/);
     assert.doesNotMatch(html, /id="save-planning-settings"/);
     assert.doesNotMatch(html, /notification-sms-opt-in|Twilio|SMS/);
     assert.doesNotMatch(app, /calculatePlanningWarnings/);
@@ -423,6 +432,10 @@ test('planning and notification release is wired end to end', () => {
     assert.match(serviceWorker, /addEventListener\('push'/);
     assert.match(shiftSwapPermissionMigration, /grant usage on schema private to authenticated/);
     assert.match(shiftSwapPermissionMigration, /grant execute on function private\.shift_date\(text, text\) to authenticated, service_role/);
+    assert.match(shiftSwapInsertMigration, /create policy shift_swap_requests_employee_insert/);
+    assert.match(shiftSwapInsertMigration, /requested_by_employee_id = public\.current_employee_id\(\)/);
+    assert.match(shiftSwapInsertMigration, /ss\.id = shift_swap_requests\.shift_id/);
+    assert.doesNotMatch(shiftSwapInsertMigration, /security definer/i);
 
     for (const table of [
         'push_subscriptions',
@@ -584,6 +597,8 @@ test('production hardening preserves history and separates save from release', (
     assert.match(cloudAdapter, /reset_employee_availability/);
     assert.match(cloudAdapter, /update-employee-email/);
     assert.match(app, /downloadEmployeeSchedulePdf/);
+    assert.match(app, /previewAdminSchedulePdf/);
+    assert.match(app, /createWeeklySchedulePdf/);
     assert.match(app, /resetAvailability/);
     assert.match(app, /openUpdateEmployeeEmail/);
 });
