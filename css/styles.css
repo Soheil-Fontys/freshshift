@@ -450,7 +450,10 @@ body {
     text-align: center;
 }
 
-#admin-week-display {
+#week-display,
+#my-week-display,
+#admin-week-display,
+#avail-week-display {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1069,6 +1072,10 @@ body {
 #plan-change-request-modal input {
     min-width: 0;
     max-width: 100%;
+}
+
+#plan-change-request-modal input {
+    box-sizing: border-box;
 }
 
 .modal-day-info {
@@ -3339,6 +3346,10 @@ body {
 
     .employee-more-actions {
         width: 100%;
+    }
+
+    .employee-more-actions[open] {
+        grid-column: 1 / -1;
     }
 
     .employee-more-actions summary {
