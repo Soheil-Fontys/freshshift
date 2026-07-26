@@ -8,6 +8,15 @@
         return { url, key };
     }
 
+    function getCalendarFeedUrl(token) {
+        const { url } = getConfig();
+        const normalizedToken = String(token || '').trim().toLowerCase();
+        if (!url || !/^[a-f0-9]{64}$/.test(normalizedToken)) {
+            throw new Error('Kalender-Link konnte nicht erstellt werden.');
+        }
+        return `${url.replace(/\/$/, '')}/functions/v1/calendar-feed?token=${encodeURIComponent(normalizedToken)}`;
+    }
+
     function ensureClient() {
         if (client) return client;
 
@@ -122,6 +131,7 @@
         signOut,
         getSession,
         getAccessToken,
-        invoke
+        invoke,
+        getCalendarFeedUrl
     };
 })();

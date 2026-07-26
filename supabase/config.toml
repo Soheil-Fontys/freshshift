@@ -20,3 +20,9 @@ additional_redirect_urls = [
 [functions]
 [functions.invite-employee]
 verify_jwt = true
+
+[functions.dispatch-notifications]
+verify_jwt = true
+
+[functions.calendar-feed]
+verify_jwt = false

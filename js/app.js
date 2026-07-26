@@ -8,6 +8,8 @@ const App = {
     currentMonth: new Date(),
     currentUser: null,
     currentEditCell: null,
+    currentPlanChangeShift: null,
+    calendarSubscriptionUrl: null,
 
     adminStore: 'fresh_fries',
     employeeStore: 'fresh_fries',
@@ -68,6 +70,8 @@ const App = {
 
         if (!session?.user) {
             this.currentUser = null;
+            this.currentPlanChangeShift = null;
+            this.calendarSubscriptionUrl = null;
             DataManager.disconnectCloud();
             if (signOutButton) signOutButton.style.display = 'none';
             this.showScreen('login-screen');
@@ -154,6 +158,7 @@ const App = {
                 else if (activePage === 'page-admin-availability') this.renderAdminAvailability();
                 else if (activePage === 'page-admin-month') this.renderMonthOverview();
                 else if (activePage === 'page-admin-employees') this.renderEmployeesTab();
+                else if (activePage === 'page-admin-history') this.renderShiftHistory();
                 else if (activePage === 'page-admin-data') this.renderAdminDataPage();
                 else this.renderAdminDashboard();
                 this.updateAdminNotifications();
@@ -163,6 +168,7 @@ const App = {
                 if (activePage === 'page-availability') this.renderAvailabilityForm();
                 else if (activePage === 'page-schedule') this.renderMyScheduleSection();
                 else if (activePage === 'page-absences') this.renderEmployeeAbsencesPage();
+                else if (activePage === 'page-open-shifts') this.renderEmployeeWorkflows();
                 else this.renderDashboard();
             }
         } catch (error) {
@@ -250,6 +256,10 @@ const App = {
         document.getElementById('my-prev-week').addEventListener('click', () => this.changeWeek(-1, false, true));
         document.getElementById('my-next-week').addEventListener('click', () => this.changeWeek(1, false, true));
         document.getElementById('download-team-pdf').addEventListener('click', () => this.downloadEmployeeSchedulePdf());
+        document.getElementById('calendar-subscribe').addEventListener('click', () => this.createCalendarSubscription());
+        document.getElementById('submit-plan-change-request').addEventListener('click', () => this.submitPlanChangeRequest());
+        document.getElementById('copy-calendar-link').addEventListener('click', () => this.copyCalendarSubscriptionLink());
+        document.getElementById('open-calendar-subscription').addEventListener('click', () => this.openCalendarSubscription());
 
         // Report Late Modal
         document.getElementById('submit-late').addEventListener('click', () => this.submitLateReport());
@@ -272,6 +282,11 @@ const App = {
         if (saveDefaultBtn) saveDefaultBtn.addEventListener('click', () => this.saveDefaultAvailability());
         const clearDefaultBtn = document.getElementById('clear-default-availability');
         if (clearDefaultBtn) clearDefaultBtn.addEventListener('click', () => this.clearDefaultAvailability());
+
+        const togglePush = document.getElementById('toggle-push-notifications');
+        if (togglePush) togglePush.addEventListener('click', () => this.togglePushNotifications());
+        const employeeNotificationsRead = document.getElementById('employee-notifications-read');
+        if (employeeNotificationsRead) employeeNotificationsRead.addEventListener('click', () => this.markEmployeeNotificationsRead());
 
         // Admin Menu
         document.getElementById('admin-menu-toggle').addEventListener('click', () => this.toggleAdminMenu());
@@ -351,6 +366,8 @@ const App = {
         // Shift Modal
         document.getElementById('save-shift').addEventListener('click', () => this.saveShift());
         document.getElementById('remove-shift').addEventListener('click', () => this.removeShift());
+        document.getElementById('open-shift').addEventListener('click', () => this.offerCurrentShift());
+        document.getElementById('save-planning-settings').addEventListener('click', () => this.savePlanningSettings());
 
         // Modal close buttons
         document.querySelectorAll('.modal-close, .modal-cancel').forEach(btn => {
@@ -367,6 +384,10 @@ const App = {
 
         if (screenId === 'dashboard-screen') {
             this.renderDashboard();
+            const target = window.location.hash.replace('#', '');
+            if (['schedule', 'availability', 'open-shifts', 'absences'].includes(target)) {
+                window.setTimeout(() => this.navigateTo(target), 0);
+            }
         } else if (screenId === 'admin-screen') {
             this.populateAdminStoreSelect();
             this.renderAdminDashboard();
@@ -405,6 +426,7 @@ const App = {
     hideModals() {
         document.querySelectorAll('.modal').forEach(m => m.classList.remove('active'));
         this.currentEditCell = null;
+        this.currentPlanChangeShift = null;
     },
 
     // ===========================
@@ -416,8 +438,8 @@ const App = {
     },
 
     navigateTo(page) {
-        // Close menu
-        this.toggleMenu();
+        document.getElementById('side-menu').classList.remove('active');
+        document.getElementById('menu-overlay').classList.remove('active');
         
         // Update menu active state
         document.querySelectorAll('#side-menu .menu-item').forEach(item => {
@@ -438,6 +460,8 @@ const App = {
             this.renderMyScheduleSection();
         } else if (page === 'absences') {
             this.renderEmployeeAbsencesPage();
+        } else if (page === 'open-shifts') {
+            this.renderEmployeeWorkflows();
         } else if (page === 'dashboard') {
             this.renderDashboard();
         }
@@ -478,6 +502,8 @@ const App = {
             this.renderMonthOverview();
         } else if (page === 'admin-employees') {
             this.renderEmployeesTab();
+        } else if (page === 'admin-history') {
+            this.renderShiftHistory();
         } else if (page === 'admin-data') {
             this.renderAdminDataPage();
         }
@@ -611,7 +637,116 @@ const App = {
         this.renderMonthlyEarnings();
         this.renderWeekOverview();
         this.renderUpcomingShifts();
+        this.renderEmployeeNotifications();
+        this.renderNotificationSettings();
         this.updateWeekDisplay();
+    },
+
+    normalizePhone(value) {
+        const compact = String(value || '').replace(/[\s()\-]/g, '');
+        if (!compact) return '';
+        if (compact.startsWith('+')) return `+${compact.slice(1).replace(/\D/g, '')}`;
+        if (compact.startsWith('00')) return `+${compact.slice(2).replace(/\D/g, '')}`;
+        if (compact.startsWith('0')) return `+49${compact.slice(1).replace(/\D/g, '')}`;
+        return `+${compact.replace(/\D/g, '')}`;
+    },
+
+    renderNotificationSettings() {
+        const status = document.getElementById('push-status');
+        const button = document.getElementById('toggle-push-notifications');
+        if (!status || !button || !this.currentUser) return;
+
+        if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+            status.textContent = 'Nicht unterstützt';
+            button.disabled = true;
+            button.textContent = 'Push nicht verfügbar';
+            return;
+        }
+
+        navigator.serviceWorker.ready
+            .then(registration => registration.pushManager.getSubscription())
+            .then(subscription => {
+                const active = Boolean(subscription);
+                status.textContent = active ? 'Push aktiv' : 'Nicht aktiv';
+                status.classList.toggle('push-active', active);
+                button.disabled = false;
+                button.textContent = active ? 'Push deaktivieren' : 'Push aktivieren';
+            })
+            .catch(() => {
+                status.textContent = 'Status unbekannt';
+            });
+    },
+
+    urlBase64ToUint8Array(value) {
+        const padding = '='.repeat((4 - value.length % 4) % 4);
+        const base64 = (value + padding).replace(/-/g, '+').replace(/_/g, '/');
+        const raw = atob(base64);
+        return Uint8Array.from([...raw].map(character => character.charCodeAt(0)));
+    },
+
+    async togglePushNotifications() {
+        const button = document.getElementById('toggle-push-notifications');
+        if (button) button.disabled = true;
+        try {
+            if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+                throw new Error('Push-Benachrichtigungen werden auf diesem Gerät nicht unterstützt.');
+            }
+            const registration = await navigator.serviceWorker.ready;
+            const existing = await registration.pushManager.getSubscription();
+            if (existing) {
+                const endpoint = existing.endpoint;
+                await existing.unsubscribe();
+                await DataManager.removePushSubscription(endpoint);
+                this.showToast('Push-Benachrichtigungen deaktiviert.', 'success');
+            } else {
+                const permission = await Notification.requestPermission();
+                if (permission !== 'granted') {
+                    throw new Error('Benachrichtigungen wurden nicht erlaubt.');
+                }
+                const publicKey = window.FRESHSHIFT_VAPID_PUBLIC_KEY || '';
+                if (!publicKey) throw new Error('Push ist noch nicht eingerichtet.');
+                const subscription = await registration.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey: this.urlBase64ToUint8Array(publicKey)
+                });
+                await DataManager.savePushSubscription(subscription);
+                this.showToast('Push-Benachrichtigungen aktiviert.', 'success');
+            }
+            this.renderNotificationSettings();
+        } catch (error) {
+            this.showToast(error?.message || 'Push konnte nicht geändert werden.', 'error');
+            this.renderNotificationSettings();
+        }
+    },
+
+    renderEmployeeNotifications() {
+        const card = document.getElementById('employee-notifications-card');
+        const list = document.getElementById('employee-notifications-list');
+        if (!card || !list || !this.currentUser) return;
+        const notifications = (DataManager.getNotifications?.() || [])
+            .filter(item => item.targetEmployeeId === this.currentUser.id && !item.read)
+            .slice(0, 8);
+        card.style.display = notifications.length > 0 ? 'block' : 'none';
+        list.innerHTML = notifications.map(item => `
+            <div class="workflow-item">
+                <div>
+                    <div class="workflow-title">${this.escapeHtml(item.message || 'Neue Mitteilung')}</div>
+                    <div class="workflow-meta">${this.formatTimestamp(item.timestamp)}</div>
+                </div>
+            </div>
+        `).join('');
+    },
+
+    async markEmployeeNotificationsRead() {
+        if (!this.currentUser) return;
+        const unread = (DataManager.getNotifications?.() || [])
+            .filter(item => item.targetEmployeeId === this.currentUser.id && !item.read);
+        try {
+            await Promise.all(unread.map(item => DataManager.markNotificationRead(item.id)));
+            this.renderEmployeeNotifications();
+        } catch (error) {
+            this.showToast(error?.message || 'Mitteilungen konnten nicht aktualisiert werden.', 'error');
+        }
     },
 
     renderTodayShift() {
@@ -825,10 +960,124 @@ const App = {
             });
         });
 
+        warnings.push(...this.calculatePlanningWarnings(schedule, storeId, weekDate));
+
         return {
             errors: [...new Set(errors)],
             warnings: [...new Set(warnings)]
         };
+    },
+
+    calculatePlanningWarnings(schedule, storeId, weekDate = this.currentWeek) {
+        if (!schedule) return [];
+        const warnings = [];
+        const weekKey = DateUtils.getWeekKey(weekDate);
+        const employees = DataManager.getEmployees();
+        const store = DataManager.getStore?.(storeId) || {
+            minimum_staff: storeId === 'yes_fresh' ? 3 : 2,
+            opening_time: '10:00',
+            closing_time: '20:00'
+        };
+
+        const employeeHours = new Map();
+        const weekSchedules = DataManager.getSchedules().filter(item => item.weekKey === weekKey);
+        const currentIndex = weekSchedules.findIndex(item =>
+            item.id === schedule.id || (item.storeId === storeId && item.weekKey === weekKey));
+        if (currentIndex >= 0) weekSchedules[currentIndex] = schedule;
+        else weekSchedules.push(schedule);
+        weekSchedules
+            .forEach(item => {
+                Object.values(item.shifts || {}).flat()
+                    .filter(shift => shift.requestStatus !== 'declined')
+                    .forEach(shift => employeeHours.set(
+                        shift.employeeId,
+                        (employeeHours.get(shift.employeeId) || 0) + DateUtils.calculateDuration(shift.start, shift.end)
+                    ));
+            });
+
+        employees.forEach(employee => {
+            const hours = employeeHours.get(employee.id) || 0;
+            if (Number.isFinite(employee.weeklyMaxHours) && hours > employee.weeklyMaxHours) {
+                warnings.push(`${employee.name}: ${DateUtils.formatDuration(hours)} geplant, maximal ${DateUtils.formatDuration(employee.weeklyMaxHours)}.`);
+            }
+            if (Number.isFinite(employee.weeklyTargetHours) && hours < employee.weeklyTargetHours) {
+                warnings.push(`${employee.name}: nur ${DateUtils.formatDuration(hours)} von ${DateUtils.formatDuration(employee.weeklyTargetHours)} Sollstunden.`);
+            }
+        });
+
+        const opening = DateUtils.parseTimeToMinutes(store.opening_time || '10:00');
+        const closing = DateUtils.parseTimeToMinutes(store.closing_time || '20:00');
+        const minimumStaff = Number(store.minimum_staff || (storeId === 'yes_fresh' ? 3 : 2));
+        DateUtils.DAY_KEYS.slice(0, 6).forEach((dayKey, dayIndex) => {
+            const ranges = (schedule.shifts?.[dayKey] || [])
+                .filter(shift => shift.requestStatus !== 'declined')
+                .map(shift => this.timeRange(shift.start, shift.end))
+                .filter(Boolean)
+                .map(range => ({ start: Math.max(opening, range.start), end: Math.min(closing, range.end) }))
+                .filter(range => range.end > range.start);
+            const points = [...new Set([opening, closing, ...ranges.flatMap(range => [range.start, range.end])])]
+                .sort((a, b) => a - b);
+            for (let index = 0; index < points.length - 1; index++) {
+                const start = points[index];
+                const end = points[index + 1];
+                if (end <= start) continue;
+                const midpoint = (start + end) / 2;
+                const coverage = ranges.filter(range => range.start <= midpoint && range.end >= midpoint).length;
+                if (coverage < minimumStaff) {
+                    warnings.push(`${DateUtils.DAYS_SHORT[dayIndex]} ${this.formatMinutesToTime(start)}–${this.formatMinutesToTime(end)}: nur ${coverage} von ${minimumStaff} benötigten Mitarbeitern.`);
+                }
+            }
+        });
+        return [...new Set(warnings)];
+    },
+
+    renderPlanningWarnings() {
+        const card = document.getElementById('planning-warnings-card');
+        const list = document.getElementById('planning-warnings-list');
+        const badge = document.getElementById('planning-warning-count');
+        if (!card || !list || !badge) return;
+        const schedule = DataManager.getScheduleForWeek(DateUtils.getWeekKey(this.currentWeek), this.adminStore);
+        const warnings = this.calculatePlanningWarnings(schedule, this.adminStore, this.currentWeek);
+        card.style.display = warnings.length > 0 ? 'block' : 'none';
+        badge.textContent = String(warnings.length);
+        list.innerHTML = warnings.map(warning => `<div class="planning-warning-item">⚠️ ${this.escapeHtml(warning)}</div>`).join('');
+    },
+
+    renderPlanningSettings() {
+        const store = DataManager.getStore?.(this.adminStore);
+        const minimumStaff = document.getElementById('planning-minimum-staff');
+        const openingTime = document.getElementById('planning-opening-time');
+        const closingTime = document.getElementById('planning-closing-time');
+        if (!store || !minimumStaff || !openingTime || !closingTime) return;
+        minimumStaff.value = String(store.minimum_staff || 2);
+        openingTime.value = store.opening_time || '10:00';
+        closingTime.value = store.closing_time || '20:00';
+    },
+
+    async savePlanningSettings() {
+        const minimumStaff = Number(document.getElementById('planning-minimum-staff')?.value);
+        const openingTime = document.getElementById('planning-opening-time')?.value || '';
+        const closingTime = document.getElementById('planning-closing-time')?.value || '';
+        if (!Number.isInteger(minimumStaff) || minimumStaff < 1 || minimumStaff > 20) {
+            this.showToast('Die Mindestbesetzung muss zwischen 1 und 20 liegen.', 'error');
+            return;
+        }
+        if (!/^\d{2}:\d{2}$/.test(openingTime) || !/^\d{2}:\d{2}$/.test(closingTime)
+            || DateUtils.parseTimeToMinutes(openingTime) >= DateUtils.parseTimeToMinutes(closingTime)) {
+            this.showToast('Bitte gültige Öffnungszeiten eingeben.', 'error');
+            return;
+        }
+        try {
+            await DataManager.saveStorePlanningSettings(this.adminStore, {
+                minimumStaff,
+                openingTime,
+                closingTime
+            });
+            this.renderPlanningWarnings();
+            this.showToast('Besetzungsregeln gespeichert.', 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'Besetzungsregeln konnten nicht gespeichert werden.', 'error');
+        }
     },
 
     renderMonthlyEarnings() {
@@ -1478,6 +1727,8 @@ const App = {
 
         // Render shared multi-admin history
         this.renderAdminActivity();
+
+        this.renderAdminWorkflows();
     },
 
     renderAdminActivity() {
@@ -1500,7 +1751,8 @@ const App = {
             au_status_changed: ['🩺', 'hat den eAU-Status geändert'],
             employee_terminated: ['🚫', 'hat einen Mitarbeiter entlassen'],
             availability_reset: ['🧪', 'hat eine Test-Verfügbarkeit zurückgesetzt'],
-            employee_email_updated: ['✉️', 'hat eine Mitarbeiter-Email korrigiert']
+            employee_email_updated: ['✉️', 'hat eine Mitarbeiter-Email korrigiert'],
+            plan_change_reviewed: ['🕒', 'hat eine Planänderung bearbeitet']
         };
 
         container.innerHTML = activity.slice(0, 12).map(item => {
@@ -1628,10 +1880,335 @@ const App = {
         card.style.display = 'block';
         list.innerHTML = missing.map(emp => `
             <div class="missing-avail-item">
-                <span class="employee-name">${this.escapeHtml(emp.name)}</span>
-                <span class="missing-label">Noch nicht eingereicht</span>
+                <div>
+                    <span class="employee-name">${this.escapeHtml(emp.name)}</span>
+                    <span class="missing-label">Noch nicht eingereicht · Push</span>
+                </div>
+                <button class="btn btn-primary btn-small" onclick="App.sendAvailabilityReminder('${emp.id}', '${nextWeekKey}')">
+                    Erinnern
+                </button>
             </div>
         `).join('');
+    },
+
+    async sendAvailabilityReminder(employeeId, weekKey) {
+        const employee = DataManager.getEmployee(employeeId);
+        try {
+            await DataManager.sendAvailabilityReminder(employeeId, this.adminStore, weekKey);
+            this.showToast(`${employee?.name || 'Mitarbeiter'} wurde erinnert.`, 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'Erinnerung konnte nicht gesendet werden.', 'error');
+        }
+    },
+
+    getWorkflowDate(weekKey, dayKey) {
+        const match = String(weekKey || '').match(/^(\d{4})-W(\d{2})$/);
+        if (!match) return null;
+        const monday = DataManager.getDateFromWeek(Number(match[1]), Number(match[2]));
+        const dayIndex = DateUtils.DAY_KEYS.indexOf(dayKey);
+        if (dayIndex < 0) return null;
+        const date = new Date(monday);
+        date.setDate(monday.getDate() + dayIndex);
+        return date;
+    },
+
+    workflowSummary(item) {
+        const date = this.getWorkflowDate(item.weekKey, item.dayKey);
+        const dayIndex = DateUtils.DAY_KEYS.indexOf(item.dayKey);
+        const day = dayIndex >= 0 ? DateUtils.DAYS_SHORT[dayIndex] : item.dayKey;
+        return `${DataManager.getStoreName(item.storeId)} · ${day}${date ? ` ${DateUtils.formatDate(date)}` : ''} · ${item.start || ''}–${item.end || ''}`;
+    },
+
+    isCurrentEmployeeAvailableForWorkflow(item) {
+        if (!this.currentUser || !item?.weekKey || !item?.dayKey || !item?.start || !item?.end) return false;
+        const availability = DataManager.getEmployeeAvailability(
+            this.currentUser.id,
+            item.weekKey,
+            item.storeId
+        );
+        const day = availability?.days?.[item.dayKey];
+        const availableRange = day?.available ? this.timeRange(day.start, day.end) : null;
+        const shiftRange = this.timeRange(item.start, item.end);
+        return Boolean(availableRange && shiftRange
+            && availableRange.start <= shiftRange.start
+            && availableRange.end >= shiftRange.end);
+    },
+
+    renderEmployeeWorkflows() {
+        const openContainer = document.getElementById('open-shifts-list');
+        const swapContainer = document.getElementById('swap-requests-list');
+        if (!openContainer || !swapContainer || !this.currentUser) return;
+        const stores = this.getUserStores();
+        const currentId = this.currentUser.id;
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        const openShifts = (DataManager.getOpenShifts?.() || []).filter(item => {
+            const involved = item.originalEmployeeId === currentId || item.claimedByEmployeeId === currentId;
+            return stores.includes(item.storeId)
+                && ['open', 'claimed'].includes(item.status)
+                && (involved || this.isCurrentEmployeeAvailableForWorkflow(item))
+                && (!this.getWorkflowDate(item.weekKey, item.dayKey) || this.getWorkflowDate(item.weekKey, item.dayKey) >= today);
+        });
+        openContainer.innerHTML = openShifts.length ? openShifts.map(item => {
+            const mine = item.claimedByEmployeeId === currentId;
+            const available = item.status === 'open' && item.originalEmployeeId !== currentId;
+            return `
+                <div class="workflow-item">
+                    <div>
+                        <div class="workflow-title">${this.escapeHtml(this.workflowSummary(item))}</div>
+                        ${item.reason ? `<div class="workflow-meta">${this.escapeHtml(item.reason)}</div>` : ''}
+                    </div>
+                    ${mine ? '<span class="absence-pill pending">Wartet auf Admin</span>' : ''}
+                    ${available ? `<button class="btn btn-success btn-small" onclick="App.claimOpenShift('${item.id}')">Übernehmen</button>` : ''}
+                </div>
+            `;
+        }).join('') : '<div class="empty-state small">Keine offenen Schichten</div>';
+
+        const swaps = (DataManager.getShiftSwaps?.() || []).map(item => {
+            const shift = DataManager.getSchedules().flatMap(schedule => Object.values(schedule.shifts || {}).flat())
+                .find(candidate => candidate.id === item.shiftId);
+            return { ...item, start: shift?.start || '', end: shift?.end || '' };
+        }).filter(item => {
+            const involved = item.requestedByEmployeeId === currentId || item.claimedByEmployeeId === currentId;
+            return stores.includes(item.storeId) && ['open', 'claimed'].includes(item.status)
+                && (involved || this.isCurrentEmployeeAvailableForWorkflow(item));
+        });
+        swapContainer.innerHTML = swaps.length ? swaps.map(item => {
+            const requester = item.requestedByEmployeeId === currentId;
+            const claimant = item.claimedByEmployeeId === currentId;
+            return `
+                <div class="workflow-item">
+                    <div>
+                        <div class="workflow-title">${this.escapeHtml(this.workflowSummary(item))}</div>
+                        <div class="workflow-meta">${requester ? 'Deine Tauschanfrage' : `${this.escapeHtml(this.getEmployeeName(item.requestedByEmployeeId))} sucht Ersatz`}</div>
+                        ${item.reason ? `<div class="workflow-meta">${this.escapeHtml(item.reason)}</div>` : ''}
+                    </div>
+                    ${requester ? `<button class="btn btn-danger btn-small" onclick="App.cancelShiftSwap('${item.id}')">Stornieren</button>` : ''}
+                    ${claimant ? '<span class="absence-pill pending">Wartet auf Admin</span>' : ''}
+                    ${!requester && !claimant && item.status === 'open' ? `<button class="btn btn-success btn-small" onclick="App.claimShiftSwap('${item.id}')">Übernehmen</button>` : ''}
+                </div>
+            `;
+        }).join('') : '<div class="empty-state small">Keine Tauschanfragen</div>';
+    },
+
+    async createShiftSwap(shiftId) {
+        const reason = prompt('Warum möchtest du diese Schicht abgeben? (optional)', '') ?? null;
+        if (reason === null) return;
+        try {
+            await DataManager.createShiftSwap(shiftId, reason);
+            this.renderMyScheduleSection();
+            this.showToast('Tauschanfrage veröffentlicht.', 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'Tauschanfrage konnte nicht erstellt werden.', 'error');
+        }
+    },
+
+    async claimShiftSwap(requestId) {
+        if (!confirm('Möchtest du diese Schicht übernehmen? Ein Admin muss noch zustimmen.')) return;
+        try {
+            await DataManager.claimShiftSwap(requestId);
+            this.renderEmployeeWorkflows();
+            this.showToast('Übernahme angefragt.', 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'Übernahme war nicht möglich.', 'error');
+        }
+    },
+
+    async cancelShiftSwap(requestId) {
+        if (!confirm('Tauschanfrage wirklich stornieren?')) return;
+        try {
+            await DataManager.cancelShiftSwap(requestId);
+            this.renderEmployeeWorkflows();
+            this.renderMyScheduleSection();
+            this.showToast('Tauschanfrage storniert.', 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'Tauschanfrage konnte nicht storniert werden.', 'error');
+        }
+    },
+
+    async claimOpenShift(openShiftId) {
+        if (!confirm('Möchtest du dich für diese offene Schicht melden?')) return;
+        try {
+            await DataManager.claimOpenShift(openShiftId);
+            this.renderEmployeeWorkflows();
+            this.showToast('Übernahme angefragt.', 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'Übernahme war nicht möglich.', 'error');
+        }
+    },
+
+    openPlanChangeRequest(shiftId) {
+        const shift = DataManager.getSchedules().flatMap(schedule => Object.values(schedule.shifts || {}).flat())
+            .find(item => item.id === shiftId && item.employeeId === this.currentUser?.id);
+        if (!shift) {
+            this.showToast('Schicht wurde nicht gefunden. Bitte neu laden.', 'error');
+            return;
+        }
+        this.currentPlanChangeShift = shift;
+        document.getElementById('plan-change-start').value = shift.start;
+        document.getElementById('plan-change-end').value = shift.end;
+        document.getElementById('plan-change-reason').value = '';
+        document.getElementById('plan-change-request-summary').textContent =
+            `Deine aktuelle Schicht ist ${shift.start}–${shift.end}.`;
+        this.showModal('plan-change-request-modal');
+    },
+
+    async submitPlanChangeRequest() {
+        const shift = this.currentPlanChangeShift;
+        const requestedStart = document.getElementById('plan-change-start').value;
+        const requestedEnd = document.getElementById('plan-change-end').value;
+        const reason = document.getElementById('plan-change-reason').value.trim();
+        if (!shift || !requestedStart || !requestedEnd || requestedStart === requestedEnd) {
+            this.showToast('Bitte gib unterschiedliche Start- und Endzeiten ein.', 'error');
+            return;
+        }
+        try {
+            await DataManager.createShiftChangeRequest(shift.id, requestedStart, requestedEnd, reason);
+            this.hideModals();
+            this.renderMyScheduleSection();
+            this.showToast('Planänderung wurde an die Geschäftsleitung gesendet.', 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'Planänderung konnte nicht angefragt werden.', 'error');
+        }
+    },
+
+    async cancelPlanChangeRequest(requestId) {
+        if (!confirm('Möchtest du diese Planänderungsanfrage zurückziehen?')) return;
+        try {
+            await DataManager.cancelShiftChangeRequest(requestId);
+            this.renderMyScheduleSection();
+            this.showToast('Planänderungsanfrage zurückgezogen.', 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'Anfrage konnte nicht zurückgezogen werden.', 'error');
+        }
+    },
+
+    async createCalendarSubscription() {
+        if (!confirm('Ein neuer Kalender-Link macht einen alten Link sofort ungültig. Nur fortfahren, wenn du ihn jetzt abonnieren möchtest.')) return;
+        try {
+            this.calendarSubscriptionUrl = await DataManager.rotateMyCalendarSubscription();
+            document.getElementById('calendar-subscription-url').value = this.calendarSubscriptionUrl;
+            this.showModal('calendar-subscription-modal');
+        } catch (error) {
+            this.showToast(error?.message || 'Kalender-Link konnte nicht erstellt werden.', 'error');
+        }
+    },
+
+    async copyCalendarSubscriptionLink() {
+        const input = document.getElementById('calendar-subscription-url');
+        const url = this.calendarSubscriptionUrl || input?.value;
+        if (!url) return;
+        try {
+            await navigator.clipboard.writeText(url);
+            this.showToast('Kalender-Link kopiert.', 'success');
+        } catch {
+            input?.select();
+            this.showToast('Link markiert. Bitte kopiere ihn manuell.', 'info');
+        }
+    },
+
+    openCalendarSubscription() {
+        if (!this.calendarSubscriptionUrl) return;
+        const webcalUrl = this.calendarSubscriptionUrl.replace(/^https?:\/\//, 'webcal://');
+        window.location.assign(webcalUrl);
+    },
+
+    renderAdminWorkflows() {
+        const container = document.getElementById('admin-workflow-list');
+        const badge = document.getElementById('workflow-count');
+        if (!container || !badge) return;
+        const openClaims = (DataManager.getOpenShifts?.() || []).filter(item =>
+            item.storeId === this.adminStore && item.status === 'claimed');
+        const swapClaims = (DataManager.getShiftSwaps?.() || []).filter(item =>
+            item.storeId === this.adminStore && item.status === 'claimed');
+        const planChanges = (DataManager.getShiftChangeRequests?.() || []).filter(item =>
+            item.storeId === this.adminStore && item.status === 'pending');
+        const items = [
+            ...openClaims.map(item => ({ kind: 'open', item })),
+            ...swapClaims.map(item => ({ kind: 'swap', item })),
+            ...planChanges.map(item => ({ kind: 'plan-change', item: {
+                ...item,
+                start: item.originalStart,
+                end: item.originalEnd
+            } }))
+        ];
+        badge.textContent = String(items.length);
+        container.innerHTML = items.length ? items.map(({ kind, item }) => {
+            const claimant = kind === 'plan-change'
+                ? this.getEmployeeName(item.employeeId)
+                : this.getEmployeeName(item.claimedByEmployeeId);
+            let display = item;
+            if (kind === 'swap') {
+                const shift = DataManager.getSchedules().flatMap(schedule => Object.values(schedule.shifts || {}).flat())
+                    .find(candidate => candidate.id === item.shiftId);
+                display = { ...item, start: shift?.start || '', end: shift?.end || '' };
+            }
+            return `
+                <div class="workflow-item">
+                    <div>
+                        <div class="workflow-title">${kind === 'open' ? 'Offene Schicht' : kind === 'swap' ? 'Tauschanfrage' : 'Planänderung'} · ${this.escapeHtml(this.workflowSummary(display))}</div>
+                        <div class="workflow-meta">${kind === 'plan-change'
+                            ? `${this.escapeHtml(claimant)}: ${this.escapeHtml(item.originalStart)}–${this.escapeHtml(item.originalEnd)} → ${this.escapeHtml(item.requestedStart)}–${this.escapeHtml(item.requestedEnd)}`
+                            : `${this.escapeHtml(claimant)} möchte übernehmen`}</div>
+                        ${kind === 'plan-change' && item.reason ? `<div class="workflow-meta">${this.escapeHtml(item.reason)}</div>` : ''}
+                    </div>
+                    <div class="request-actions">
+                        <button class="btn btn-success btn-small" onclick="App.reviewWorkflow('${kind}', '${item.id}', true)">Bestätigen</button>
+                        <button class="btn btn-danger btn-small" onclick="App.reviewWorkflow('${kind}', '${item.id}', false)">Ablehnen</button>
+                    </div>
+                </div>
+            `;
+        }).join('') : '<div class="empty-state small">Keine offenen Bestätigungen</div>';
+    },
+
+    async reviewWorkflow(kind, id, approve) {
+        const note = approve ? '' : (prompt('Grund für die Ablehnung (optional)', '') ?? null);
+        if (!approve && note === null) return;
+        try {
+            if (kind === 'open') await DataManager.reviewOpenShift(id, approve, note);
+            else if (kind === 'swap') await DataManager.reviewShiftSwap(id, approve, note);
+            else await DataManager.reviewShiftChangeRequest(id, approve, note);
+            this.renderAdminDashboard();
+            this.renderAdminView();
+            this.showToast(approve ? 'Anfrage bestätigt.' : 'Anfrage abgelehnt.', 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'Übernahme konnte nicht bearbeitet werden.', 'error');
+        }
+    },
+
+    renderShiftHistory() {
+        const container = document.getElementById('shift-history-list');
+        if (!container) return;
+        const history = (DataManager.getShiftHistory?.() || []).filter(item =>
+            !this.adminStore || item.storeId === this.adminStore);
+        const labels = {
+            published: 'veröffentlicht',
+            added: 'hinzugefügt',
+            time_changed: 'Zeit geändert',
+            removed: 'entfernt',
+            reassigned: 'neu zugeteilt',
+            opened: 'als offen markiert',
+            swap_approved: 'getauscht',
+            open_shift_assigned: 'offene Schicht besetzt'
+        };
+        container.innerHTML = history.length ? history.map(item => {
+            const before = item.before?.start ? `${item.before.start}–${item.before.end}` : '';
+            const after = item.after?.start ? `${item.after.start}–${item.after.end}` : '';
+            const times = before && after ? `${before} → ${after}` : (after || before);
+            const date = this.getWorkflowDate(item.weekKey, item.dayKey);
+            return `
+                <div class="history-item">
+                    <div class="history-main">
+                        <strong>${this.escapeHtml(item.employeeName)}</strong>
+                        <span>${this.escapeHtml(labels[item.changeType] || item.changeType)}</span>
+                    </div>
+                    <div class="history-meta">
+                        ${date ? DateUtils.formatDate(date) : this.escapeHtml(item.weekKey)}${times ? ` · ${this.escapeHtml(times)}` : ''} · ${this.formatTimestamp(item.createdAt)}
+                    </div>
+                </div>
+            `;
+        }).join('') : '<div class="empty-state">Noch keine veröffentlichten Schichtänderungen</div>';
     },
 
     renderAdminWeekStatus(schedule, employees) {
@@ -2395,6 +2972,30 @@ const App = {
                 }
 
                 const requestHtml = isPending ? `<div class="shift-deviation early">⏳ Schichtanfrage offen</div>` : '';
+                const activeSwap = (DataManager.getShiftSwaps?.() || []).find(request =>
+                    request.shiftId === myShift.id && ['open', 'claimed'].includes(request.status));
+                const activePlanChange = (DataManager.getShiftChangeRequests?.() || []).find(request =>
+                    request.scheduleId === schedule.id
+                    && request.employeeId === this.currentUser?.id
+                    && request.dayKey === dayKey
+                    && request.status === 'pending');
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                const canSwap = schedule.released && !isPending && dates[index] >= today;
+                const swapHtml = activeSwap
+                    ? `<div class="shift-deviation early">↔️ Tauschanfrage ${activeSwap.status === 'claimed' ? 'wartet auf Admin' : 'offen'}</div>`
+                    : canSwap
+                        ? `<button class="btn btn-secondary btn-small shift-swap-button" onclick="App.createShiftSwap('${myShift.id}')">Schicht abgeben</button>`
+                        : '';
+                const planChangeHtml = activePlanChange
+                    ? `
+                        <div class="shift-deviation early">🕒 Änderungsanfrage offen: ${this.escapeHtml(activePlanChange.requestedStart)}–${this.escapeHtml(activePlanChange.requestedEnd)}</div>
+                        <div class="my-shift-actions">
+                          <button class="btn btn-danger btn-small" onclick="App.cancelPlanChangeRequest('${activePlanChange.id}')">Zurückziehen</button>
+                        </div>`
+                    : canSwap
+                        ? `<div class="my-shift-actions"><button class="btn btn-secondary btn-small" onclick="App.openPlanChangeRequest('${myShift.id}')">Zeiten ändern</button></div>`
+                        : '';
                 
                 card.className = 'my-shift-card';
                 card.innerHTML = `
@@ -2407,6 +3008,8 @@ const App = {
                         <div class="shift-note">${isPending ? 'Anfrage' : DateUtils.formatDuration(hours)}</div>
                         ${requestHtml}
                         ${deviationHtml}
+                        ${swapHtml}
+                        ${planChangeHtml}
                     </div>
                 `;
             } else {
@@ -2731,6 +3334,8 @@ const App = {
         if (printWeek) {
             printWeek.textContent = `${DateUtils.formatWeekDisplay(this.currentWeek)} · ${DataManager.getStoreName(this.adminStore)}`;
         }
+        this.renderPlanningWarnings();
+        this.renderPlanningSettings();
     },
 
     printSchedule() {
@@ -2836,6 +3441,7 @@ const App = {
         // Check if shift exists
         const existingShift = schedule?.shifts?.[dayKey]?.find(s => s.employeeId === employeeId);
         const removeBtn = document.getElementById('remove-shift');
+        const openBtn = document.getElementById('open-shift');
         
         if (existingShift) {
             document.getElementById('shift-start').value = existingShift.start;
@@ -2844,6 +3450,7 @@ const App = {
             document.getElementById('actual-end').value = existingShift.actualEnd || '';
             document.getElementById('deviation-note').value = existingShift.deviation?.reason || '';
             removeBtn.style.display = 'block';
+            openBtn.style.display = 'block';
         } else {
             document.getElementById('shift-start').value = dayAvail?.start || '10:00';
             document.getElementById('shift-end').value = dayAvail?.end || '20:00';
@@ -2851,6 +3458,7 @@ const App = {
             document.getElementById('actual-end').value = '';
             document.getElementById('deviation-note').value = '';
             removeBtn.style.display = 'none';
+            openBtn.style.display = 'none';
         }
 
         this.showModal('shift-modal');
@@ -2860,6 +3468,29 @@ const App = {
         document.getElementById('shift-start').value = decodeURIComponent(start || '');
         document.getElementById('shift-end').value = decodeURIComponent(end || '');
         await this.saveShift();
+    },
+
+    async offerCurrentShift() {
+        if (!this.currentEditCell) return;
+        const { employeeId, dayKey } = this.currentEditCell;
+        const weekKey = DateUtils.getWeekKey(this.currentWeek);
+        const schedule = DataManager.getScheduleForWeek(weekKey, this.adminStore);
+        const shift = schedule?.shifts?.[dayKey]?.find(item => item.employeeId === employeeId);
+        if (!shift?.id) {
+            this.showToast('Schicht wurde nicht gefunden.', 'error');
+            return;
+        }
+        const reason = prompt('Warum wird Ersatz gesucht?', 'Krankheitsvertretung');
+        if (reason === null) return;
+        try {
+            await DataManager.createOpenShift(shift.id, reason);
+            this.hideModals();
+            this.renderAdminView();
+            this.renderAdminDashboard();
+            this.showToast('Schicht ist jetzt offen. Passende Mitarbeiter wurden informiert.', 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'Schicht konnte nicht geöffnet werden.', 'error');
+        }
     },
 
     async saveShift() {
@@ -3404,6 +4035,12 @@ const App = {
             const accountDetail = emp.email
                 ? `<div class="employee-type">${this.escapeHtml(emp.email)}</div>`
                 : '';
+            const phoneDetail = emp.phone
+                ? `<div class="employee-type">${this.escapeHtml(emp.phone)}</div>`
+                : '<div class="employee-type">Keine Handynummer</div>';
+            const hoursDetail = (Number.isFinite(emp.weeklyTargetHours) || Number.isFinite(emp.weeklyMaxHours))
+                ? `<div class="employee-type">Woche: ${Number.isFinite(emp.weeklyTargetHours) ? `${this.escapeHtml(emp.weeklyTargetHours)}h Soll` : 'kein Soll'} · ${Number.isFinite(emp.weeklyMaxHours) ? `${this.escapeHtml(emp.weeklyMaxHours)}h max.` : 'kein Maximum'}</div>`
+                : '';
             const inviteButton = emp.profileId
                 ? '<button class="btn btn-secondary btn-small" disabled>Eingeladen</button>'
                 : `<button class="btn btn-primary btn-small" onclick="App.openInviteEmployee('${emp.id}', '${this.encodeActionData(emp.name)}')"><span class="btn-icon-inline">✉️</span> Einladen</button>`;
@@ -3423,6 +4060,8 @@ const App = {
                             <div class="employee-stores">${storeChips}</div>
                             <div class="employee-type">${emp.type === 'aushilfe' ? 'Aushilfe' : 'Festangestellt'}</div>
                             ${accountDetail}
+                            ${phoneDetail}
+                            ${hoursDetail}
                         </div>
                     </div>
                     <div class="employee-actions">
@@ -3725,6 +4364,9 @@ const App = {
         document.getElementById('new-emp-name').value = '';
         document.getElementById('new-emp-type').value = 'aushilfe';
         document.getElementById('new-emp-hourly').value = '';
+        document.getElementById('new-emp-phone').value = '';
+        document.getElementById('new-emp-target-hours').value = '';
+        document.getElementById('new-emp-max-hours').value = '18';
 
         // Default store = current admin store
         document.getElementById('store-fresh-fries').checked = (this.adminStore === 'fresh_fries');
@@ -3745,6 +4387,9 @@ const App = {
         document.getElementById('new-emp-name').value = emp.name || '';
         document.getElementById('new-emp-type').value = emp.type || 'aushilfe';
         document.getElementById('new-emp-hourly').value = (Number(emp.hourlyRate) > 0) ? String(emp.hourlyRate).replace('.', ',') : '';
+        document.getElementById('new-emp-phone').value = emp.phone || '';
+        document.getElementById('new-emp-target-hours').value = Number.isFinite(emp.weeklyTargetHours) ? String(emp.weeklyTargetHours) : '';
+        document.getElementById('new-emp-max-hours').value = Number.isFinite(emp.weeklyMaxHours) ? String(emp.weeklyMaxHours) : '';
 
         const stores = Array.isArray(emp.stores) && emp.stores.length > 0 ? emp.stores : [emp.primaryStore || emp.store || 'fresh_fries'];
         document.getElementById('store-fresh-fries').checked = stores.includes('fresh_fries');
@@ -3794,6 +4439,11 @@ const App = {
 
         const hourlyRaw = document.getElementById('new-emp-hourly').value.trim();
         const hourlyRate = hourlyRaw ? Number(hourlyRaw.replace(',', '.')) : null;
+        const phone = this.normalizePhone(document.getElementById('new-emp-phone').value);
+        const targetRaw = document.getElementById('new-emp-target-hours').value.trim();
+        const maxRaw = document.getElementById('new-emp-max-hours').value.trim();
+        const weeklyTargetHours = targetRaw ? Number(targetRaw.replace(',', '.')) : null;
+        const weeklyMaxHours = maxRaw ? Number(maxRaw.replace(',', '.')) : null;
 
         const stores = [];
         if (document.getElementById('store-fresh-fries').checked) stores.push('fresh_fries');
@@ -3831,12 +4481,32 @@ const App = {
             return;
         }
 
+        if (phone && !/^\+[1-9]\d{7,14}$/.test(phone)) {
+            this.showToast('Ungültige Handynummer.', 'error');
+            return;
+        }
+        if (weeklyTargetHours !== null && (!Number.isFinite(weeklyTargetHours) || weeklyTargetHours < 0 || weeklyTargetHours > 80)) {
+            this.showToast('Ungültige Sollstunden.', 'error');
+            return;
+        }
+        if (weeklyMaxHours !== null && (!Number.isFinite(weeklyMaxHours) || weeklyMaxHours < 0 || weeklyMaxHours > 80)) {
+            this.showToast('Ungültige Maximalstunden.', 'error');
+            return;
+        }
+        if (weeklyTargetHours !== null && weeklyMaxHours !== null && weeklyTargetHours > weeklyMaxHours) {
+            this.showToast('Sollstunden dürfen nicht höher als die Maximalstunden sein.', 'error');
+            return;
+        }
+
         const employeePatch = {
             name,
             type,
             primaryStore,
             stores,
-            hourlyRate: hourlyRate
+            hourlyRate: hourlyRate,
+            phone,
+            weeklyTargetHours,
+            weeklyMaxHours
         };
 
         try {

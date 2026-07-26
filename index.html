@@ -187,6 +187,11 @@
                 Urlaub/Krank melden
               </button>
             </li>
+            <li>
+              <button class="menu-item" data-page="open-shifts">
+                Offene Schichten
+              </button>
+            </li>
           </ul>
           <div class="menu-footer">
             <button
@@ -217,6 +222,14 @@
               </div>
             </div>
 
+            <div id="employee-notifications-card" class="dashboard-card" style="display:none">
+              <div class="card-header">
+                <h3>Neue Mitteilungen</h3>
+                <button id="employee-notifications-read" class="btn btn-secondary btn-small">Gelesen</button>
+              </div>
+              <div id="employee-notifications-list" class="workflow-list"></div>
+            </div>
+
             <!-- Quick Actions -->
             <div class="dashboard-card quick-actions-card">
               <h3>Schnellaktionen</h3>
@@ -228,6 +241,21 @@
                 <button id="btn-early" class="quick-action-btn early">
                   <span class="action-icon">🚪</span>
                   <span class="action-text">Früher Feierabend</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="dashboard-card notification-settings-card">
+              <div class="card-header">
+                <h3>Handy-Benachrichtigungen</h3>
+                <span id="push-status" class="today-badge">Nicht aktiv</span>
+              </div>
+              <p class="helper-text">
+                Aktiviere Push-Benachrichtigungen, damit du Änderungen an deinem Plan direkt auf diesem Gerät siehst.
+              </p>
+              <div class="notification-settings-actions">
+                <button id="toggle-push-notifications" class="btn btn-primary">
+                  Push aktivieren
                 </button>
               </div>
             </div>
@@ -333,14 +361,23 @@
           <div id="page-schedule" class="page-content">
             <div class="page-header-with-action">
               <h3>Mein Schichtplan</h3>
-              <button
-                type="button"
-                id="download-team-pdf"
-                class="btn btn-secondary btn-small"
-                disabled
-              >
-                <span class="btn-icon-inline">⬇</span> Wochenplan als PDF
-              </button>
+              <div class="schedule-page-actions">
+                <button
+                  type="button"
+                  id="calendar-subscribe"
+                  class="btn btn-secondary btn-small"
+                >
+                  <span class="btn-icon-inline">📅</span> Kalender
+                </button>
+                <button
+                  type="button"
+                  id="download-team-pdf"
+                  class="btn btn-secondary btn-small"
+                  disabled
+                >
+                  <span class="btn-icon-inline">⬇</span> Wochenplan als PDF
+                </button>
+              </div>
             </div>
             <div class="store-row" id="my-store-row" style="display: none">
               <label for="my-store-select" class="store-label">Geschäft</label>
@@ -364,6 +401,23 @@
               </div>
               <div id="team-schedule-content" class="team-schedule-content"></div>
             </section>
+          </div>
+
+          <div id="page-open-shifts" class="page-content">
+            <div class="page-header">
+              <h3>Offene Schichten</h3>
+            </div>
+            <p class="helper-text">
+              Du kannst dich für eine offene Schicht oder eine Tauschanfrage melden. Ein Admin bestätigt die Übernahme.
+            </p>
+            <div class="dashboard-card">
+              <div class="card-header"><h3>Ersatz gesucht</h3></div>
+              <div id="open-shifts-list" class="workflow-list"></div>
+            </div>
+            <div class="dashboard-card">
+              <div class="card-header"><h3>Tauschanfragen</h3></div>
+              <div id="swap-requests-list" class="workflow-list"></div>
+            </div>
           </div>
 
           <!-- Employee Absences Page -->
@@ -501,6 +555,59 @@
         </div>
       </div>
 
+      <!-- Plan Change Request Modal -->
+      <div id="plan-change-request-modal" class="modal">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h3>Planänderung anfragen</h3>
+            <button class="modal-close">&times;</button>
+          </div>
+          <div class="modal-body">
+            <p id="plan-change-request-summary" class="modal-info"></p>
+            <div class="form-group">
+              <label for="plan-change-start">Ich kann ab</label>
+              <input id="plan-change-start" type="time" required />
+            </div>
+            <div class="form-group">
+              <label for="plan-change-end">Ich kann bis</label>
+              <input id="plan-change-end" type="time" required />
+            </div>
+            <div class="form-group">
+              <label for="plan-change-reason">Grund (optional)</label>
+              <input id="plan-change-reason" type="text" maxlength="1000" placeholder="z.B. Termin bis 12 Uhr" />
+            </div>
+            <p class="helper-text">Die Schicht bleibt erst unverändert. Ein Admin entscheidet über die Anfrage.</p>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-secondary modal-cancel">Abbrechen</button>
+            <button class="btn btn-primary" id="submit-plan-change-request">Anfrage senden</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Calendar Subscription Modal -->
+      <div id="calendar-subscription-modal" class="modal">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h3>Kalender abonnieren</h3>
+            <button class="modal-close">&times;</button>
+          </div>
+          <div class="modal-body">
+            <p class="modal-info">Der Kalender enthält nur deine veröffentlichten Schichten und aktualisiert sich bei Planänderungen automatisch.</p>
+            <p class="helper-text">Der Link ist privat. Teile ihn nicht weiter. Wenn dein Handy verloren geht, erstelle hier einen neuen Link.</p>
+            <div class="form-group">
+              <label for="calendar-subscription-url">Privater Kalender-Link</label>
+              <input id="calendar-subscription-url" type="text" readonly />
+            </div>
+          </div>
+          <div class="modal-footer calendar-subscription-actions">
+            <button class="btn btn-secondary modal-cancel">Schließen</button>
+            <button class="btn btn-secondary" id="copy-calendar-link">Link kopieren</button>
+            <button class="btn btn-primary" id="open-calendar-subscription">Im Apple Kalender abonnieren</button>
+          </div>
+        </div>
+      </div>
+
       <!-- Admin Screen -->
       <div id="admin-screen" class="screen">
         <header class="app-header">
@@ -561,6 +668,11 @@
               </button>
             </li>
             <li>
+              <button class="menu-item" data-page="admin-history">
+                Änderungsverlauf
+              </button>
+            </li>
+            <li>
               <button class="menu-item" data-page="admin-data">Daten</button>
             </li>
           </ul>
@@ -616,6 +728,14 @@
                   Wochenplan bearbeiten
                 </button>
               </div>
+            </div>
+
+            <div class="dashboard-card workflow-card">
+              <div class="card-header">
+                <h3>Schichtübernahmen</h3>
+                <span id="workflow-count" class="week-badge">0</span>
+              </div>
+              <div id="admin-workflow-list" class="workflow-list"></div>
             </div>
 
             <!-- Today's Shifts Card -->
@@ -712,6 +832,36 @@
                 Freigeben
               </button>
             </div>
+
+            <div id="planning-warnings-card" class="dashboard-card warning-card" style="display:none">
+              <div class="card-header">
+                <h3>Planungswarnungen</h3>
+                <span id="planning-warning-count" class="week-badge">0</span>
+              </div>
+              <div id="planning-warnings-list" class="planning-warnings-list"></div>
+            </div>
+
+            <details class="dashboard-card planning-settings-card">
+              <summary>Besetzungsregeln</summary>
+              <p class="helper-text">Diese Werte bestimmen die Warnungen im Wochenplan.</p>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="planning-minimum-staff">Mindestbesetzung</label>
+                  <input id="planning-minimum-staff" type="number" min="1" max="20" step="1" />
+                </div>
+                <div class="form-group">
+                  <label for="planning-opening-time">Von</label>
+                  <input id="planning-opening-time" type="time" />
+                </div>
+                <div class="form-group">
+                  <label for="planning-closing-time">Bis</label>
+                  <input id="planning-closing-time" type="time" />
+                </div>
+              </div>
+              <button type="button" id="save-planning-settings" class="btn btn-secondary">
+                Besetzungsregeln speichern
+              </button>
+            </details>
 
             <div class="print-header">
               <div class="print-brand">
@@ -820,6 +970,16 @@
               </div>
               <div id="absences-overview-list" class="absences-list"></div>
             </div>
+          </div>
+
+          <div id="page-admin-history" class="page-content">
+            <div class="page-header">
+              <h3>Schicht-Änderungsverlauf</h3>
+            </div>
+            <p class="helper-text">
+              Hier stehen veröffentlichte Änderungen. Entwürfe werden erst beim Freigeben protokolliert.
+            </p>
+            <div id="shift-history-list" class="history-list"></div>
           </div>
 
           <!-- Data Page (Backup/Import) -->
@@ -939,6 +1099,13 @@
             >
               Entfernen
             </button>
+            <button
+              class="btn btn-secondary"
+              id="open-shift"
+              style="display: none"
+            >
+              Ersatz suchen
+            </button>
             <button class="btn btn-primary" id="save-shift">Speichern</button>
           </div>
         </div>
@@ -1030,6 +1197,27 @@
                   min="0"
                   placeholder="z.B. 13,50"
                 />
+              </div>
+              <div class="form-group">
+                <label for="new-emp-phone">Handynummer</label>
+                <input
+                  type="tel"
+                  id="new-emp-phone"
+                  inputmode="tel"
+                  maxlength="16"
+                  placeholder="+491701234567"
+                />
+                <p class="helper-text">Optional für die Mitarbeiterverwaltung. Sie wird nicht für Benachrichtigungen verwendet.</p>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="new-emp-target-hours">Sollstunden/Woche</label>
+                  <input type="number" id="new-emp-target-hours" min="0" max="80" step="0.5" />
+                </div>
+                <div class="form-group">
+                  <label for="new-emp-max-hours">Maximalstunden/Woche</label>
+                  <input type="number" id="new-emp-max-hours" min="0" max="80" step="0.5" />
+                </div>
               </div>
             </div>
           </div>
@@ -1180,6 +1368,9 @@
       window.FRESHSHIFT_SUPABASE_PUBLISHABLE_KEY =
         window.FRESHSHIFT_SUPABASE_PUBLISHABLE_KEY ||
         "sb_publishable_oIlen9vQLozQghcqGJTMjQ_W03bXXqX";
+      window.FRESHSHIFT_VAPID_PUBLIC_KEY =
+        window.FRESHSHIFT_VAPID_PUBLIC_KEY ||
+        "BIVyHrrsLG-HaMbcW7n6RdGEpROERr5BdHXi4nxNxwLicX01uSF1D3s694-VmI7RV2ZlNbkfPCXBKyAxB8tGM08";
     </script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.7"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf@4.2.1/dist/jspdf.umd.min.js"></script>

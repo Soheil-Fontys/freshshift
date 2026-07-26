@@ -29,7 +29,7 @@ test('login screen only exposes invited-email authentication', () => {
     assert.doesNotMatch(html, /id="employee-select"/);
     assert.match(html, /id="loading-screen" class="screen active"/);
     assert.doesNotMatch(html, /id="login-screen" class="screen active"/);
-    assert.match(serviceWorker, /freshshift-v15/);
+    assert.match(serviceWorker, /freshshift-v17/);
     assert.match(serviceWorker, /fetch\(event\.request\)[\s\S]*caches\.match\(event\.request\)/);
     assert.match(html, /id="switch-to-admin-view"/);
     assert.match(html, /id="switch-to-employee-view"/);
@@ -348,6 +348,10 @@ test('release validation blocks invalid and unresolved shifts', () => {
     vm.runInContext(fs.readFileSync(path.join(root, 'js/app.js'), 'utf8'), context);
     vm.runInContext(`
         DataManager.getEmployee = () => ({ id: 'employee-1', name: 'Test', active: true });
+        DataManager.getEmployees = () => ([{
+            id: 'employee-1', name: 'Test', active: true,
+            weeklyTargetHours: null, weeklyMaxHours: 6
+        }]);
         DataManager.getEmployeeAbsenceForDate = () => null;
         DataManager.getEmployeeAvailability = () => ({
             days: { monday: { available: true, start: '08:00', end: '20:00' } }
@@ -375,11 +379,99 @@ test('release validation blocks invalid and unresolved shifts', () => {
     vm.runInContext(`scheduleForTest.shifts.monday[0].requestStatus = 'none'`, context);
     const valid = vm.runInContext(`App.validateScheduleForRelease(scheduleForTest, 'fresh_fries')`, context);
     assert.deepEqual(Array.from(valid.errors), []);
-    assert.deepEqual(Array.from(valid.warnings), []);
+    assert.ok(valid.warnings.some(warning => warning.includes('benötigten Mitarbeitern')));
+    assert.ok(valid.warnings.some(warning => warning.includes('Test:') && warning.includes('maximal')));
 
     vm.runInContext(`scheduleForTest.shifts.monday[0].end = '10:00'`, context);
     const invalidTime = vm.runInContext(`App.validateScheduleForRelease(scheduleForTest, 'fresh_fries')`, context);
     assert.match(invalidTime.errors.join(' '), /ungültige Zeiten/);
+});
+
+test('planning and notification release is wired end to end', () => {
+    const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+    const app = fs.readFileSync(path.join(root, 'js/app.js'), 'utf8');
+    const cloud = fs.readFileSync(path.join(root, 'js/cloud-data.js'), 'utf8');
+    const serviceWorker = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
+    const migration = fs.readFileSync(
+        path.join(root, 'supabase/migrations/20260722222119_notification_and_planning_release.sql'),
+        'utf8'
+    );
+    const dispatcher = fs.readFileSync(
+        path.join(root, 'supabase/functions/dispatch-notifications/index.ts'),
+        'utf8'
+    );
+
+    assert.match(html, /class="dashboard-card notification-settings-card"/);
+    assert.match(html, /id="page-open-shifts"/);
+    assert.match(html, /id="admin-workflow-list"/);
+    assert.match(html, /id="page-admin-history"/);
+    assert.match(html, /id="save-planning-settings"/);
+    assert.doesNotMatch(html, /notification-sms-opt-in|Twilio|SMS/);
+    assert.match(app, /calculatePlanningWarnings/);
+    assert.match(app, /sendAvailabilityReminder/);
+    assert.match(cloud, /createShiftSwap/);
+    assert.match(cloud, /reviewOpenShift/);
+    assert.match(serviceWorker, /addEventListener\('push'/);
+
+    for (const table of [
+        'push_subscriptions',
+        'shift_swap_requests',
+        'open_shifts',
+        'shift_change_history',
+        'notification_deliveries'
+    ]) {
+        assert.match(migration, new RegExp(`alter table public\\.${table} enable row level security`));
+    }
+    assert.match(migration, /get_notification_service_config/);
+    assert.match(migration, /claim_notification_deliveries/);
+    assert.match(dispatcher, /verifyOtp|createClient/);
+    assert.doesNotMatch(dispatcher, /twilio|sms|phone_e164/i);
+    assert.match(dispatcher, /web-push@3\.6\.7/);
+    assert.match(dispatcher, /callerIsAdmin/);
+    assert.match(dispatcher, /Admin access required/);
+    assert.doesNotMatch(dispatcher, /TWILIO_AUTH_TOKEN\s*=/);
+});
+
+test('plan changes and private calendar subscriptions stay scoped to the employee', () => {
+    const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+    const app = fs.readFileSync(path.join(root, 'js/app.js'), 'utf8');
+    const cloud = fs.readFileSync(path.join(root, 'js/cloud-data.js'), 'utf8');
+    const supabaseClient = fs.readFileSync(path.join(root, 'js/supabase.js'), 'utf8');
+    const migration = fs.readFileSync(
+        path.join(root, 'supabase/migrations/20260726130000_plan_change_requests_and_calendar_subscriptions.sql'),
+        'utf8'
+    );
+    const calendarFunction = fs.readFileSync(
+        path.join(root, 'supabase/functions/calendar-feed/index.ts'),
+        'utf8'
+    );
+    const config = fs.readFileSync(path.join(root, 'supabase/config.toml'), 'utf8');
+
+    assert.match(html, /id="plan-change-request-modal"/);
+    assert.match(html, /id="calendar-subscription-modal"/);
+    assert.match(html, /id="calendar-subscribe"/);
+    assert.match(app, /openPlanChangeRequest/);
+    assert.match(app, /cancelPlanChangeRequest/);
+    assert.match(app, /createCalendarSubscription/);
+    assert.match(cloud, /createShiftChangeRequest/);
+    assert.match(cloud, /reviewShiftChangeRequest/);
+    assert.match(cloud, /rotateMyCalendarSubscription/);
+    assert.match(supabaseClient, /getCalendarFeedUrl/);
+
+    for (const table of ['shift_change_requests', 'calendar_subscriptions']) {
+        assert.match(migration, new RegExp(`alter table public\\.${table} enable row level security`));
+    }
+    assert.match(migration, /token_hash text not null unique/);
+    assert.match(migration, /rotate_my_calendar_subscription_token/);
+    assert.match(migration, /create_shift_change_request/);
+    assert.match(migration, /review_shift_change_request/);
+    assert.match(migration, /schedule_id, employee_id, day_key/);
+    assert.match(calendarFunction, /get_calendar_feed/);
+    assert.match(calendarFunction, /text\/calendar/);
+    assert.match(calendarFunction, /TZID:Europe\/Berlin/);
+    assert.match(calendarFunction, /UID:\$\{shift\.schedule_id\}-\$\{shift\.day_key\}@freshshift\.de/);
+    assert.match(migration, /create or replace function public\.get_calendar_feed/);
+    assert.match(config, /\[functions\.calendar-feed\]\s+verify_jwt = false/);
 });
 
 test('production hardening preserves history and separates save from release', () => {
