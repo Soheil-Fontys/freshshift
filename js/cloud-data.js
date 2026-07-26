@@ -17,6 +17,7 @@
         activity: [],
         openShifts: [],
         shiftSwaps: [],
+        shiftChangeRequests: [],
         shiftHistory: [],
         pushSubscriptions: []
     });
@@ -276,13 +277,14 @@
             supabase.from('activity_log').select('*').order('created_at', { ascending: false }).limit(50),
             supabase.from('open_shifts').select('*').order('created_at', { ascending: false }),
             supabase.from('shift_swap_requests').select('*').order('created_at', { ascending: false }),
+            supabase.from('shift_change_requests').select('*').order('requested_at', { ascending: false }),
             role === 'admin'
                 ? supabase.from('shift_change_history').select('*').order('created_at', { ascending: false }).limit(100)
                 : Promise.resolve({ data: [], error: null }),
             supabase.from('push_subscriptions').select('id,profile_id,endpoint,enabled,last_success_at')
         ]);
 
-        const [stores, employees, employeeStores, availabilities, schedules, shifts, absences, notifications, teamShifts, notificationReads, activity, openShifts, shiftSwaps, shiftHistory, pushSubscriptions] =
+        const [stores, employees, employeeStores, availabilities, schedules, shifts, absences, notifications, teamShifts, notificationReads, activity, openShifts, shiftSwaps, shiftChangeRequests, shiftHistory, pushSubscriptions] =
             results.map((result, index) => unwrap(result, `Cloud-Daten konnten nicht geladen werden (${index + 1}).`) || []);
 
         const mappedEmployees = employees.map(row => mapEmployee(row, employeeStores));
@@ -327,6 +329,25 @@
                 reason: row.reason,
                 adminNote: row.admin_note,
                 createdAt: row.created_at
+            })),
+            shiftChangeRequests: shiftChangeRequests.map(row => ({
+                id: row.id,
+                shiftId: row.shift_id,
+                scheduleId: row.schedule_id,
+                storeId: row.store_id,
+                weekKey: row.week_key,
+                dayKey: row.day_key,
+                employeeId: row.employee_id,
+                originalStart: row.original_start,
+                originalEnd: row.original_end,
+                requestedStart: row.requested_start,
+                requestedEnd: row.requested_end,
+                reason: row.reason,
+                status: row.status,
+                adminNote: row.admin_note,
+                requestedAt: row.requested_at,
+                reviewedAt: row.reviewed_at,
+                cancelledAt: row.cancelled_at
             })),
             shiftHistory: shiftHistory.map(row => ({
                 id: row.id,
@@ -685,6 +706,10 @@
             return cache.shiftSwaps;
         },
 
+        getShiftChangeRequests() {
+            return cache.shiftChangeRequests;
+        },
+
         getShiftHistory() {
             return cache.shiftHistory;
         },
@@ -758,6 +783,45 @@
             await loadCloudData();
             await this.dispatchNotifications();
             return id;
+        },
+
+        async createShiftChangeRequest(shiftId, requestedStart, requestedEnd, reason) {
+            const id = unwrap(await requireClient().rpc('create_shift_change_request', {
+                p_shift_id: shiftId,
+                p_requested_start: requestedStart,
+                p_requested_end: requestedEnd,
+                p_reason: reason || null
+            }), 'Planänderungsanfrage konnte nicht erstellt werden.');
+            await loadCloudData();
+            await this.dispatchNotifications();
+            return id;
+        },
+
+        async cancelShiftChangeRequest(requestId) {
+            const id = unwrap(await requireClient().rpc('cancel_shift_change_request', {
+                p_request_id: requestId
+            }), 'Planänderungsanfrage konnte nicht zurückgezogen werden.');
+            await loadCloudData();
+            return id;
+        },
+
+        async reviewShiftChangeRequest(requestId, approve, note) {
+            requireAdmin();
+            const id = unwrap(await requireClient().rpc('review_shift_change_request', {
+                p_request_id: requestId,
+                p_approve: Boolean(approve),
+                p_note: note || null
+            }), 'Planänderungsanfrage konnte nicht bearbeitet werden.');
+            await loadCloudData();
+            await this.dispatchNotifications();
+            return id;
+        },
+
+        async rotateMyCalendarSubscription() {
+            if (!currentEmployee) throw new Error('Aktiver Mitarbeiterzugang erforderlich.');
+            const token = unwrap(await requireClient().rpc('rotate_my_calendar_subscription_token'),
+                'Kalender-Link konnte nicht erstellt werden.');
+            return window.FreshShiftSupabase.getCalendarFeedUrl(token);
         },
 
         async respondToShiftRequest(shiftId, status, reason) {

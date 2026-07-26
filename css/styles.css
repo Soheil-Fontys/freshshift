@@ -3704,16 +3704,34 @@ body {
     margin-top: var(--space-xs);
 }
 
+.schedule-page-actions,
+.calendar-subscription-actions {
+    display: flex;
+    gap: var(--space-xs);
+    align-items: center;
+}
+
+.my-shift-actions {
+    display: flex;
+    gap: var(--space-xs);
+    flex-wrap: wrap;
+    margin-top: var(--space-xs);
+}
+
 @media (max-width: 640px) {
     .notification-settings-actions,
-    .workflow-item {
+    .workflow-item,
+    .schedule-page-actions,
+    .calendar-subscription-actions {
         align-items: stretch;
         flex-direction: column;
     }
 
     .notification-settings-actions .btn,
     .workflow-item .btn,
-    .workflow-item .request-actions {
+    .workflow-item .request-actions,
+    .schedule-page-actions .btn,
+    .calendar-subscription-actions .btn {
         width: 100%;
     }
 

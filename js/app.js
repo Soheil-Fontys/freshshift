@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 53670)
+Total output lines: 4619
+
 /**
  * FreshShift - Main Application
  * Manual scheduling with deviation tracking
@@ -8,6 +11,8 @@ const App = {
     currentMonth: new Date(),
     currentUser: null,
     currentEditCell: null,
+    currentPlanChangeShift: null,
+    calendarSubscriptionUrl: null,
 
     adminStore: 'fresh_fries',
     employeeStore: 'fresh_fries',
@@ -68,6 +73,8 @@ const App = {
 
         if (!session?.user) {
             this.currentUser = null;
+            this.currentPlanChangeShift = null;
+            this.calendarSubscriptionUrl = null;
             DataManager.disconnectCloud();
             if (signOutButton) signOutButton.style.display = 'none';
             this.showScreen('login-screen');
@@ -252,6 +259,10 @@ const App = {
         document.getElementById('my-prev-week').addEventListener('click', () => this.changeWeek(-1, false, true));
         document.getElementById('my-next-week').addEventListener('click', () => this.changeWeek(1, false, true));
         document.getElementById('download-team-pdf').addEventListener('click', () => this.downloadEmployeeSchedulePdf());
+        document.getElementById('calendar-subscribe').addEventListener('click', () => this.createCalendarSubscription());
+        document.getElementById('submit-plan-change-request').addEventListener('click', () => this.submitPlanChangeRequest());
+        document.getElementById('copy-calendar-link').addEventListener('click', () => this.copyCalendarSubscriptionLink());
+        document.getElementById('open-calendar-subscription').addEventListener('click', () => this.openCalendarSubscription());
 
         // Report Late Modal
         document.getElementById('submit-late').addEventListener('click', () => this.submitLateReport());
@@ -420,6 +431,7 @@ const App = {
     hideModals() {
         document.querySelectorAll('.modal').forEach(m => m.classList.remove('active'));
         this.currentEditCell = null;
+        this.currentPlanChangeShift = null;
     },
 
     // ===========================
@@ -1767,7 +1779,8 @@ const App = {
             au_status_changed: ['🩺', 'hat den eAU-Status geändert'],
             employee_terminated: ['🚫', 'hat einen Mitarbeiter entlassen'],
             availability_reset: ['🧪', 'hat eine Test-Verfügbarkeit zurückgesetzt'],
-            employee_email_updated: ['✉️', 'hat eine Mitarbeiter-Email korrigiert']
+            employee_email_updated: ['✉️', 'hat eine Mitarbeiter-Email korrigiert'],
+            plan_change_reviewed: ['🕒', 'hat eine Planänderung bearbeitet']
         };
 
         container.innerHTML = activity.slice(0, 12).map(item => {
@@ -2053,262 +2066,60 @@ const App = {
         }
     },
 
-    renderAdminWorkflows() {
-        const container = document.getElementById('admin-workflow-list');
-        const badge = document.getElementById('workflow-count');
-        if (!container || !badge) return;
-        const openClaims = (DataManager.getOpenShifts?.() || []).filter(item =>
-            item.storeId === this.adminStore && item.status === 'claimed');
-        const swapClaims = (DataManager.getShiftSwaps?.() || []).filter(item =>
-            item.storeId === this.adminStore && item.status === 'claimed');
-        const items = [
-            ...openClaims.map(item => ({ kind: 'open', item })),
-            ...swapClaims.map(item => ({ kind: 'swap', item }))
-        ];
-        badge.textContent = String(items.length);
-        container.innerHTML = items.length ? items.map(({ kind, item }) => {
-            const claimant = this.getEmployeeName(item.claimedByEmployeeId);
-            let display = item;
-            if (kind === 'swap') {
-                const shift = DataManager.getSchedules().flatMap(schedule => Object.values(schedule.shifts || {}).flat())
-                    .find(candidate => candidate.id === item.shiftId);
-                display = { ...item, start: shift?.start || '', end: shift?.end || '' };
-            }
-            return `
-                <div class="workflow-item">
-                    <div>
-                        <div class="workflow-title">${kind === 'open' ? 'Offene Schicht' : 'Tauschanfrage'} · ${this.escapeHtml(this.workflowSummary(display))}</div>
-                        <div class="workflow-meta">${this.escapeHtml(claimant)} möchte übernehmen</div>
-                    </div>
-                    <div class="request-actions">
-                        <button class="btn btn-success btn-small" onclick="App.reviewWorkflow('${kind}', '${item.id}', true)">Bestätigen</button>
-                        <button class="btn btn-danger btn-small" onclick="App.reviewWorkflow('${kind}', '${item.id}', false)">Ablehnen</button>
-                    </div>
-                </div>
-            `;
-        }).join('') : '<div class="empty-state small">Keine offenen Bestätigungen</div>';
+    openPlanChangeRequest(shiftId) {
+        const shift = DataManager.getSchedules().flatMap(schedule => Object.values(schedule.shifts || {}).flat())
+            .find(item => item.id === shiftId && item.employeeId === this.currentUser?.id);
+        if (!shift) {
+            this.showToast('Schicht wurde nicht gefunden. Bitte neu laden.', 'error');
+            return;
+        }
+        this.currentPlanChangeShift = shift;
+        document.getElementById('plan-change-start').value = shift.start;
+        document.getElementById('plan-change-end').value = shift.end;
+        document.getElementById('plan-change-reason').value = '';
+        document.getElementById('plan-change-request-summary').textContent =
+            `Deine aktuelle Schicht ist ${shift.start}–${shift.end}.`;
+        this.showModal('plan-change-request-modal');
     },
 
-    async reviewWorkflow(kind, id, approve) {
-        const note = approve ? '' : (prompt('Grund für die Ablehnung (optional)', '') ?? null);
-        if (!approve && note === null) return;
+    async submitPlanChangeRequest() {
+        const shift = this.currentPlanChangeShift;
+        const requestedStart = document.getElementById('plan-change-start').value;
+        const requestedEnd = document.getElementById('plan-change-end').value;
+        const reason = document.getElementById('plan-change-reason').value.trim();
+        if (!shift || !requestedStart || !requestedEnd || requestedStart === requestedEnd) {
+            this.showToast('Bitte gib unterschiedliche Start- und Endzeiten ein.', 'error');
+            return;
+        }
         try {
-            if (kind === 'open') await DataManager.reviewOpenShift(id, approve, note);
-            else await DataManager.reviewShiftSwap(id, approve, note);
-            this.renderAdminDashboard();
-            this.renderAdminView();
-            this.showToast(approve ? 'Übernahme bestätigt.' : 'Übernahme abgelehnt.', 'success');
+            await DataManager.createShiftChangeRequest(shift.id, requestedStart, requestedEnd, reason);
+            this.hideModals();
+            this.renderMyScheduleSection();
+            this.showToast('Planänderung wurde an die Geschäftsleitung gesendet.', 'success');
         } catch (error) {
-            this.showToast(error?.message || 'Übernahme konnte nicht bearbeitet werden.', 'error');
+            this.showToast(error?.message || 'Planänderung konnte nicht angefragt werden.', 'error');
         }
     },
 
-    renderShiftHistory() {
-        const container = document.getElementById('shift-history-list');
-        if (!container) return;
-        const history = (DataManager.getShiftHistory?.() || []).filter(item =>
-            !this.adminStore || item.storeId === this.adminStore);
-        const labels = {
-            published: 'veröffentlicht',
-            added: 'hinzugefügt',
-            time_changed: 'Zeit geändert',
-            removed: 'entfernt',
-            reassigned: 'neu zugeteilt',
-            opened: 'als offen markiert',
-            swap_approved: 'getauscht',
-            open_shift_assigned: 'offene Schicht besetzt'
-        };
-        container.innerHTML = history.length ? history.map(item => {
-            const before = item.before?.start ? `${item.before.start}–${item.before.end}` : '';
-            const after = item.after?.start ? `${item.after.start}–${item.after.end}` : '';
-            const times = before && after ? `${before} → ${after}` : (after || before);
-            const date = this.getWorkflowDate(item.weekKey, item.dayKey);
-            return `
-                <div class="history-item">
-                    <div class="history-main">
-                        <strong>${this.escapeHtml(item.employeeName)}</strong>
-                        <span>${this.escapeHtml(labels[item.changeType] || item.changeType)}</span>
-                    </div>
-                    <div class="history-meta">
-                        ${date ? DateUtils.formatDate(date) : this.escapeHtml(item.weekKey)}${times ? ` · ${this.escapeHtml(times)}` : ''} · ${this.formatTimestamp(item.createdAt)}
-                    </div>
-                </div>
-            `;
-        }).join('') : '<div class="empty-state">Noch keine veröffentlichten Schichtänderungen</div>';
-    },
-
-    renderAdminWeekStatus(schedule, employees) {
-        const container = document.getElementById('admin-week-status');
-        
-        if (!schedule) {
-            container.innerHTML = `
-                <div class="status-warning">
-                    <span class="status-icon">⚠️</span>
-                    <span>Noch kein Wochenplan erstellt</span>
-                </div>
-            `;
-            return;
-        }
-        
-        // Count shifts
-        let totalShifts = 0;
-        let totalHours = 0;
-        
-        DateUtils.DAY_KEYS.forEach(dayKey => {
-                const dayShifts = schedule.shifts?.[dayKey] || [];
-                const activeShifts = dayShifts.filter(s => s.requestStatus !== 'declined');
-                totalShifts += activeShifts.length;
-                activeShifts.forEach(shift => {
-                    totalHours += DateUtils.calculateDuration(shift.start, shift.end);
-                });
-        });
-        
-        const statusClass = schedule.released ? 'status-success' : 'status-pending';
-        const statusText = schedule.released ? 'Plan freigegeben' : 'Plan nicht freigegeben';
-        const statusIcon = schedule.released ? '✓' : '⏳';
-        
-        container.innerHTML = `
-            <div class="${statusClass}">
-                <span class="status-icon">${statusIcon}</span>
-                <span>${statusText}</span>
-            </div>
-            <div class="week-status-stats">
-                <span>${totalShifts} Schichten</span>
-                <span>${DateUtils.formatDuration(totalHours)}</span>
-            </div>
-        `;
-    },
-
-    renderAdminTodayShifts(schedule, today) {
-        const container = document.getElementById('admin-today-shifts');
-        const todayKey = DateUtils.getTodayKey();
-        const todayShifts = (schedule?.shifts?.[todayKey] || [])
-            .filter(shift => shift.requestStatus !== 'declined');
-        
-        if (todayShifts.length === 0) {
-            container.innerHTML = '<div class="empty-today">Keine Schichten heute</div>';
-            return;
-        }
-        
-        container.innerHTML = todayShifts.map(shift => {
-            let deviationBadge = '';
-            if (shift.deviation) {
-                if (shift.deviation.lateMinutes) {
-                    deviationBadge = `<span class="deviation-badge late">+${this.escapeHtml(shift.deviation.lateMinutes)}m</span>`;
-                } else if (shift.deviation.earlyMinutes) {
-                    deviationBadge = `<span class="deviation-badge early">-${this.escapeHtml(shift.deviation.earlyMinutes)}m</span>`;
-                }
-            }
-            
-            return `
-                <div class="today-shift-item">
-                    <span class="shift-employee">${this.escapeHtml(this.getEmployeeName(shift.employeeId, shift.employeeName))}</span>
-                    <span class="shift-time">${shift.start} – ${shift.end}</span>
-                    ${deviationBadge}
-                </div>
-            `;
-        }).join('');
-    },
-
-    renderAdminQuickStats(employees, schedule, availabilities) {
-        document.getElementById('stat-total-employees').textContent = employees.length;
-        
-        // Count week shifts and hours
-        let totalShifts = 0;
-        let totalHours = 0;
-        
-        if (schedule) {
-            DateUtils.DAY_KEYS.forEach(dayKey => {
-                const dayShifts = schedule.shifts?.[dayKey] || [];
-                totalShifts += dayShifts.length;
-                dayShifts.forEach(shift => {
-                    totalHours += DateUtils.calculateDuration(shift.start, shift.end);
-                });
-            });
-        }
-        
-        document.getElementById('stat-week-shifts').textContent = totalShifts;
-        document.getElementById('stat-week-hours').textContent = DateUtils.formatDuration(totalHours);
-        document.getElementById('stat-availabilities').textContent = availabilities.length;
-    },
-
-    updateAdminNotifications() {
-        const notifications = DataManager.getUnreadNotifications()
-            .filter(n => (n.target !== 'employee') && (!n.storeId || n.storeId === this.adminStore));
-
-        const badge = document.getElementById('notification-badge');
-        const count = document.getElementById('notification-count');
-        const card = document.getElementById('notifications-card');
-        const list = document.getElementById('notifications-list');
-        
-        if (notifications.length > 0) {
-            badge.style.display = 'inline-flex';
-            count.textContent = notifications.length;
-            card.style.display = 'block';
-            
-            list.innerHTML = notifications.map(n => {
-                let icon = '🔔';
-                if (n.type === 'early') icon = '🚪';
-                else if (n.type === 'late') icon = '⏰';
-                else if (n.type === 'shift_request_response') icon = '✅';
-                else if (n.type === 'absence_request') icon = '📅';
-                else if (n.type === 'absence_notice') icon = '🤒';
-                else if (n.type === 'absence_cancelled') icon = '↩️';
-
-                const titleName = n.employeeName ? `${this.escapeHtml(n.employeeName)}: ` : '';
-
-                const needsAbsenceActions = n.type === 'absence_request' && n.absenceId;
-                let actions = needsAbsenceActions ? (() => {
-                    const payload = this.encodeActionData(JSON.stringify({ notificationId: n.id, absenceId: n.absenceId }));
-                    return `
-                        <div class="request-actions" style="margin-top: 8px; flex-direction: row;">
-                            <button class="btn btn-success btn-small" onclick="App.approveAbsenceRequest('${payload}')">Genehmigen</button>
-                            <button class="btn btn-danger btn-small" onclick="App.denyAbsenceRequest('${payload}')">Ablehnen</button>
-                        </div>
-                    `;
-                })() : '';
-
-                if (!actions && n.weekKey) {
-                    const context = this.encodeActionData(JSON.stringify({ notificationId: n.id, weekKey: n.weekKey }));
-                    actions = `
-                        <div class="request-actions" style="margin-top: 8px; flex-direction: row;">
-                            <button class="btn btn-primary btn-small" onclick="App.openNotificationPlan('${context}')">Im Plan öffnen</button>
-                        </div>
-                    `;
-                } else if (!actions && ['absence_notice', 'absence_cancelled'].includes(n.type)) {
-                    const context = this.encodeActionData(JSON.stringify({ notificationId: n.id }));
-                    actions = `
-                        <div class="request-actions" style="margin-top: 8px; flex-direction: row;">
-                            <button class="btn btn-primary btn-small" onclick="App.openNotificationAbsences('${context}')">Abwesenheit prüfen</button>
-                        </div>
-                    `;
-                }
-
-                return `
-                    <div class="notification-item ${['early', 'late', 'shift_request_response', 'absence_request', 'absence_notice', 'absence_cancelled'].includes(n.type) ? n.type : 'info'}">
-                        <span class="notification-icon">${icon}</span>
-                        <div class="notification-content">
-                            <div class="notification-title">${titleName}${this.escapeHtml(n.message || '')}${n.storeId ? ` · ${this.escapeHtml(DataManager.getStoreName(n.storeId))}` : ''}</div>
-                            ${n.reason ? `<div class="notification-reason">${n.type === 'shift_request_response' ? 'Info' : 'Grund'}: ${this.escapeHtml(n.reason)}</div>` : ''}
-                            <div class="notification-time">${this.formatTimestamp(n.timestamp)}</div>
-                            ${actions}
-                        </div>
-                    </div>
-                `;
-            }).join('');
-        } else {
-            badge.style.display = 'none';
-            card.style.display = 'none';
+    async cancelPlanChangeRequest(requestId) {
+        if (!confirm('Möchtest du diese Planänderungsanfrage zurückziehen?')) return;
+        try {
+            await DataManager.cancelShiftChangeRequest(requestId);
+            this.renderMyScheduleSection();
+            this.showToast('Planänderungsanfrage zurückgezogen.', 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'Anfrage konnte nicht zurückgezogen werden.', 'error');
         }
     },
 
-    // ===========================
-    // Admin Tabs
-    // ===========================
-    handleAdminTab(tab) {
-        const tabName = tab.dataset.tab;
-        
-        // Update tab active state
+    async createCalendarSubscription() {
+        if (!confirm('Ein neuer Kalender-Link macht einen alten Link sofort ungültig. Nur fortfahren, wenn du ihn jetzt abonnieren möchtest.')) return;
+        try {
+            this.calendarSubscriptionUrl = await DataManager.rotateMyCalendarSubscription();
+            document.getElementById('calendar-subscription-url').value = this.calendarSubscriptionUrl;
+            this.showModal('calendar-subscription-modal');
+        } catch (error) {
+            this.showToast(error?.message || 'Kalender-Link konnte nicht erstellt werden.'…3670 tokens truncated…        // Update tab active state
         document.querySelectorAll('.tab-btn').forEach(t => t.classList.remove('active'));
         tab.classList.add('active');
         
@@ -2900,6 +2711,11 @@ const App = {
                 const requestHtml = isPending ? `<div class="shift-deviation early">⏳ Schichtanfrage offen</div>` : '';
                 const activeSwap = (DataManager.getShiftSwaps?.() || []).find(request =>
                     request.shiftId === myShift.id && ['open', 'claimed'].includes(request.status));
+                const activePlanChange = (DataManager.getShiftChangeRequests?.() || []).find(request =>
+                    request.scheduleId === schedule.id
+                    && request.employeeId === this.currentUser?.id
+                    && request.dayKey === dayKey
+                    && request.status === 'pending');
                 const today = new Date();
                 today.setHours(0, 0, 0, 0);
                 const canSwap = schedule.released && !isPending && dates[index] >= today;
@@ -2907,6 +2723,15 @@ const App = {
                     ? `<div class="shift-deviation early">↔️ Tauschanfrage ${activeSwap.status === 'claimed' ? 'wartet auf Admin' : 'offen'}</div>`
                     : canSwap
                         ? `<button class="btn btn-secondary btn-small shift-swap-button" onclick="App.createShiftSwap('${myShift.id}')">Schicht abgeben</button>`
+                        : '';
+                const planChangeHtml = activePlanChange
+                    ? `
+                        <div class="shift-deviation early">🕒 Änderungsanfrage offen: ${this.escapeHtml(activePlanChange.requestedStart)}–${this.escapeHtml(activePlanChange.requestedEnd)}</div>
+                        <div class="my-shift-actions">
+                          <button class="btn btn-danger btn-small" onclick="App.cancelPlanChangeRequest('${activePlanChange.id}')">Zurückziehen</button>
+                        </div>`
+                    : canSwap
+                        ? `<div class="my-shift-actions"><button class="btn btn-secondary btn-small" onclick="App.openPlanChangeRequest('${myShift.id}')">Zeiten ändern</button></div>`
                         : '';
                 
                 card.className = 'my-shift-card';
@@ -2921,6 +2746,7 @@ const App = {
                         ${requestHtml}
                         ${deviationHtml}
                         ${swapHtml}
+                        ${planChangeHtml}
                     </div>
                 `;
             } else {

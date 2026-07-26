@@ -379,14 +379,23 @@
           <div id="page-schedule" class="page-content">
             <div class="page-header-with-action">
               <h3>Mein Schichtplan</h3>
-              <button
-                type="button"
-                id="download-team-pdf"
-                class="btn btn-secondary btn-small"
-                disabled
-              >
-                <span class="btn-icon-inline">⬇</span> Wochenplan als PDF
-              </button>
+              <div class="schedule-page-actions">
+                <button
+                  type="button"
+                  id="calendar-subscribe"
+                  class="btn btn-secondary btn-small"
+                >
+                  <span class="btn-icon-inline">📅</span> Kalender
+                </button>
+                <button
+                  type="button"
+                  id="download-team-pdf"
+                  class="btn btn-secondary btn-small"
+                  disabled
+                >
+                  <span class="btn-icon-inline">⬇</span> Wochenplan als PDF
+                </button>
+              </div>
             </div>
             <div class="store-row" id="my-store-row" style="display: none">
               <label for="my-store-select" class="store-label">Geschäft</label>
@@ -560,6 +569,59 @@
             <button class="btn btn-danger" id="submit-request-decline">
               Ablehnen
             </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Plan Change Request Modal -->
+      <div id="plan-change-request-modal" class="modal">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h3>Planänderung anfragen</h3>
+            <button class="modal-close">&times;</button>
+          </div>
+          <div class="modal-body">
+            <p id="plan-change-request-summary" class="modal-info"></p>
+            <div class="form-group">
+              <label for="plan-change-start">Ich kann ab</label>
+              <input id="plan-change-start" type="time" required />
+            </div>
+            <div class="form-group">
+              <label for="plan-change-end">Ich kann bis</label>
+              <input id="plan-change-end" type="time" required />
+            </div>
+            <div class="form-group">
+              <label for="plan-change-reason">Grund (optional)</label>
+              <input id="plan-change-reason" type="text" maxlength="1000" placeholder="z.B. Termin bis 12 Uhr" />
+            </div>
+            <p class="helper-text">Die Schicht bleibt erst unverändert. Ein Admin entscheidet über die Anfrage.</p>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-secondary modal-cancel">Abbrechen</button>
+            <button class="btn btn-primary" id="submit-plan-change-request">Anfrage senden</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Calendar Subscription Modal -->
+      <div id="calendar-subscription-modal" class="modal">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h3>Kalender abonnieren</h3>
+            <button class="modal-close">&times;</button>
+          </div>
+          <div class="modal-body">
+            <p class="modal-info">Der Kalender enthält nur deine veröffentlichten Schichten und aktualisiert sich bei Planänderungen automatisch.</p>
+            <p class="helper-text">Der Link ist privat. Teile ihn nicht weiter. Wenn dein Handy verloren geht, erstelle hier einen neuen Link.</p>
+            <div class="form-group">
+              <label for="calendar-subscription-url">Privater Kalender-Link</label>
+              <input id="calendar-subscription-url" type="text" readonly />
+            </div>
+          </div>
+          <div class="modal-footer calendar-subscription-actions">
+            <button class="btn btn-secondary modal-cancel">Schließen</button>
+            <button class="btn btn-secondary" id="copy-calendar-link">Link kopieren</button>
+            <button class="btn btn-primary" id="open-calendar-subscription">Im Apple Kalender abonnieren</button>
           </div>
         </div>
       </div>
