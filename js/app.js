@@ -6,6 +6,7 @@
 const App = {
     currentWeek: new Date(),
     currentMonth: new Date(),
+    workHoursWeek: new Date(),
     currentUser: null,
     currentEditCell: null,
     currentPlanChangeShift: null,
@@ -332,6 +333,9 @@ const App = {
         document.getElementById('prev-month').addEventListener('click', () => this.changeMonth(-1));
         document.getElementById('next-month').addEventListener('click', () => this.changeMonth(1));
 
+        document.getElementById('work-hours-prev-week').addEventListener('click', () => this.changeWorkHoursWeek(-1));
+        document.getElementById('work-hours-next-week').addEventListener('click', () => this.changeWorkHoursWeek(1));
+
         // Notifications
         document.getElementById('notification-badge').addEventListener('click', () => this.toggleNotifications());
         document.getElementById('clear-notifications').addEventListener('click', () => this.clearNotifications());
@@ -494,12 +498,143 @@ const App = {
             this.renderAdminAvailability();
         } else if (page === 'admin-month') {
             this.renderMonthOverview();
+        } else if (page === 'admin-work-hours') {
+            this.renderAdminWorkHours();
         } else if (page === 'admin-employees') {
             this.renderEmployeesTab();
         } else if (page === 'admin-history') {
             this.renderShiftHistory();
         } else if (page === 'admin-data') {
             this.renderAdminDataPage();
+        }
+    },
+
+    changeWorkHoursWeek(delta) {
+        this.workHoursWeek.setDate(this.workHoursWeek.getDate() + (delta * 7));
+        this.renderAdminWorkHours();
+    },
+
+    workMinutes(start, end) {
+        const range = this.timeRange(start, end);
+        return range ? range.end - range.start : 0;
+    },
+
+    formatWorkMinutes(minutes) {
+        if (!Number.isFinite(minutes)) return '–';
+        return DateUtils.formatDuration(minutes / 60);
+    },
+
+    async renderAdminWorkHours() {
+        const display = document.getElementById('work-hours-week-display');
+        const summary = document.getElementById('work-hours-summary');
+        const list = document.getElementById('work-hours-list');
+        if (!display || !summary || !list) return;
+
+        const weekKey = DateUtils.getWeekKey(this.workHoursWeek);
+        display.textContent = DateUtils.formatWeekDisplay(this.workHoursWeek);
+        const storeEmployees = DataManager.getEmployees()
+            .filter(employee => employee.active && (employee.stores || []).includes(this.adminStore))
+            .sort((a, b) => String(a.name).localeCompare(String(b.name), 'de'));
+        const schedule = DataManager.getScheduleForWeek(weekKey, this.adminStore);
+        const shifts = Object.entries(schedule?.shifts || {}).flatMap(([dayKey, dayShifts]) =>
+            (dayShifts || []).filter(shift => shift.requestStatus !== 'declined').map(shift => ({ ...shift, dayKey }))
+        );
+
+        list.innerHTML = '<div class="empty-state">Arbeitszeitdaten werden geladen…</div>';
+        let settlements = [];
+        try {
+            settlements = await DataManager.getWorkTimeSettlements(weekKey, this.adminStore);
+        } catch (error) {
+            list.innerHTML = `<div class="empty-state">${this.escapeHtml(error?.message || 'Arbeitszeitdaten konnten nicht geladen werden.')}</div>`;
+            return;
+        }
+        const settlementByEmployee = new Map(settlements.map(item => [item.employeeId, item]));
+        const rows = storeEmployees.map(employee => {
+            const employeeShifts = shifts.filter(shift => shift.employeeId === employee.id);
+            const plannedMinutes = employeeShifts.reduce((sum, shift) => sum + this.workMinutes(shift.start, shift.end), 0);
+            const completeEntries = employeeShifts.filter(shift => shift.actualStart && shift.actualEnd);
+            const actualMinutes = completeEntries.reduce((sum, shift) => sum + this.workMinutes(shift.actualStart, shift.actualEnd), 0);
+            const allTimesRecorded = employeeShifts.length > 0 && completeEntries.length === employeeShifts.length;
+            const settlement = settlementByEmployee.get(employee.id) || { status: 'open', note: '' };
+            return { employee, employeeShifts, plannedMinutes, actualMinutes, allTimesRecorded, settlement };
+        });
+
+        const plannedTotal = rows.reduce((sum, row) => sum + row.plannedMinutes, 0);
+        const actualTotal = rows.reduce((sum, row) => sum + row.actualMinutes, 0);
+        const recordedCount = rows.filter(row => row.allTimesRecorded).length;
+        summary.innerHTML = `
+            <div class="work-hours-stat"><strong>${this.formatWorkMinutes(plannedTotal)}</strong><span>geplant</span></div>
+            <div class="work-hours-stat"><strong>${this.formatWorkMinutes(actualTotal)}</strong><span>erfasst</span></div>
+            <div class="work-hours-stat"><strong>${recordedCount}/${rows.length}</strong><span>vollständig erfasst</span></div>`;
+
+        if (!rows.length) {
+            list.innerHTML = '<div class="empty-state">Keine aktiven Mitarbeiter für diesen Betrieb.</div>';
+            return;
+        }
+
+        list.innerHTML = rows.map(row => {
+            const difference = row.actualMinutes - row.plannedMinutes;
+            const targetMinutes = Number.isFinite(row.employee.weeklyTargetHours) ? row.employee.weeklyTargetHours * 60 : null;
+            const shiftRows = row.employeeShifts.map(shift => `
+                <div class="work-shift-row">
+                    <span>${this.escapeHtml(DateUtils.DAYS_SHORT[DateUtils.DAY_KEYS.indexOf(shift.dayKey)])} · ${this.escapeHtml(shift.start)}–${this.escapeHtml(shift.end)}</span>
+                    <label>Von <input type="time" id="work-start-${shift.id}" value="${this.escapeHtml(shift.actualStart || '')}" step="60"></label>
+                    <label>Bis <input type="time" id="work-end-${shift.id}" value="${this.escapeHtml(shift.actualEnd || '')}" step="60"></label>
+                    <button class="btn btn-secondary btn-small" onclick="App.saveWorkTimeEntry('${shift.id}')">Speichern</button>
+                </div>`).join('') || '<div class="helper-text">Keine Schichten geplant.</div>';
+            return `
+                <section class="work-hours-card">
+                    <div class="work-hours-card-header">
+                        <div><h4>${this.escapeHtml(row.employee.name)}</h4><span>${this.escapeHtml(DataManager.getStoreName(this.adminStore))}</span></div>
+                        <span class="work-hours-status ${this.escapeHtml(row.settlement.status)}">${this.workTimeStatusLabel(row.settlement.status)}</span>
+                    </div>
+                    <div class="work-hours-totals">
+                        <div><span>Geplant</span><strong>${this.formatWorkMinutes(row.plannedMinutes)}</strong></div>
+                        <div><span>Tatsächlich</span><strong>${row.allTimesRecorded ? this.formatWorkMinutes(row.actualMinutes) : `${this.formatWorkMinutes(row.actualMinutes)} · offen`}</strong></div>
+                        <div><span>Abweichung</span><strong class="${difference > 0 ? 'positive' : difference < 0 ? 'negative' : ''}">${row.allTimesRecorded ? (difference > 0 ? '+' : '') + this.formatWorkMinutes(difference) : '–'}</strong></div>
+                        ${targetMinutes !== null ? `<div><span>Sollzeit</span><strong>${this.formatWorkMinutes(targetMinutes)}</strong></div>` : ''}
+                    </div>
+                    <div class="work-shift-list">${shiftRows}</div>
+                    <div class="work-hours-settlement">
+                        <label>Status <select id="work-status-${row.employee.id}">
+                            ${['open', 'paid', 'time_off', 'corrected'].map(status => `<option value="${status}" ${row.settlement.status === status ? 'selected' : ''}>${this.workTimeStatusLabel(status)}</option>`).join('')}
+                        </select></label>
+                        <label>Notiz <input id="work-note-${row.employee.id}" maxlength="500" value="${this.escapeHtml(row.settlement.note || '')}" placeholder="z.B. mit Juli-Lohn abgerechnet"></label>
+                        <button class="btn btn-primary btn-small" onclick="App.saveWorkTimeSettlement('${row.employee.id}')">Status speichern</button>
+                    </div>
+                </section>`;
+        }).join('');
+    },
+
+    workTimeStatusLabel(status) {
+        return ({ open: 'Offen', paid: 'Ausgezahlt', time_off: 'Freizeitausgleich', corrected: 'Korrigiert' })[status] || 'Offen';
+    },
+
+    async saveWorkTimeEntry(shiftId) {
+        const start = document.getElementById(`work-start-${shiftId}`)?.value || null;
+        const end = document.getElementById(`work-end-${shiftId}`)?.value || null;
+        if (Boolean(start) !== Boolean(end) || (start && !this.timeRange(start, end))) {
+            this.showToast('Bitte beide tatsächlichen Zeiten gültig eingeben.', 'error');
+            return;
+        }
+        try {
+            await DataManager.saveWorkTimeEntry(shiftId, start, end);
+            await this.renderAdminWorkHours();
+            this.showToast('Arbeitszeit gespeichert.', 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'Arbeitszeit konnte nicht gespeichert werden.', 'error');
+        }
+    },
+
+    async saveWorkTimeSettlement(employeeId) {
+        const status = document.getElementById(`work-status-${employeeId}`)?.value || 'open';
+        const note = document.getElementById(`work-note-${employeeId}`)?.value || '';
+        try {
+            await DataManager.saveWorkTimeSettlement(employeeId, DateUtils.getWeekKey(this.workHoursWeek), this.adminStore, status, note);
+            await this.renderAdminWorkHours();
+            this.showToast('Abrechnungsstatus gespeichert.', 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'Status konnte nicht gespeichert werden.', 'error');
         }
     },
 
