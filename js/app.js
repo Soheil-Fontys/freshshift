@@ -319,12 +319,7 @@ const App = {
         document.getElementById('admin-next-week').addEventListener('click', () => this.changeWeek(1, true));
         document.getElementById('save-schedule').addEventListener('click', () => this.saveSchedule());
          document.getElementById('release-schedule').addEventListener('click', () => this.releaseSchedule());
-         document.getElementById('copy-last-week').addEventListener('click', () => this.copyLastWeek());
          document.getElementById('print-schedule').addEventListener('click', () => this.printSchedule());
-
-         // Copy week modal actions
-         document.getElementById('copy-week-skip').addEventListener('click', () => this.applyCopyWeek(true));
-         document.getElementById('copy-week-all').addEventListener('click', () => this.applyCopyWeek(false));
         
         // Admin quick action
         document.getElementById('quick-edit-plan').addEventListener('click', () => this.navigateAdminTo('admin-planner'));
@@ -367,7 +362,6 @@ const App = {
         document.getElementById('save-shift').addEventListener('click', () => this.saveShift());
         document.getElementById('remove-shift').addEventListener('click', () => this.removeShift());
         document.getElementById('open-shift').addEventListener('click', () => this.offerCurrentShift());
-        document.getElementById('save-planning-settings').addEventListener('click', () => this.savePlanningSettings());
 
         // Modal close buttons
         document.querySelectorAll('.modal-close, .modal-cancel').forEach(btn => {
@@ -654,9 +648,11 @@ const App = {
     renderNotificationSettings() {
         const status = document.getElementById('push-status');
         const button = document.getElementById('toggle-push-notifications');
-        if (!status || !button || !this.currentUser) return;
+        const card = document.querySelector('.notification-settings-card');
+        if (!status || !button || !card || !this.currentUser) return;
 
         if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+            card.hidden = false;
             status.textContent = 'Nicht unterstützt';
             button.disabled = true;
             button.textContent = 'Push nicht verfügbar';
@@ -667,12 +663,14 @@ const App = {
             .then(registration => registration.pushManager.getSubscription())
             .then(subscription => {
                 const active = Boolean(subscription);
+                card.hidden = active;
                 status.textContent = active ? 'Push aktiv' : 'Nicht aktiv';
                 status.classList.toggle('push-active', active);
                 button.disabled = false;
                 button.textContent = active ? 'Push deaktivieren' : 'Push aktivieren';
             })
             .catch(() => {
+                card.hidden = false;
                 status.textContent = 'Status unbekannt';
             });
     },
@@ -960,124 +958,10 @@ const App = {
             });
         });
 
-        warnings.push(...this.calculatePlanningWarnings(schedule, storeId, weekDate));
-
         return {
             errors: [...new Set(errors)],
             warnings: [...new Set(warnings)]
         };
-    },
-
-    calculatePlanningWarnings(schedule, storeId, weekDate = this.currentWeek) {
-        if (!schedule) return [];
-        const warnings = [];
-        const weekKey = DateUtils.getWeekKey(weekDate);
-        const employees = DataManager.getEmployees();
-        const store = DataManager.getStore?.(storeId) || {
-            minimum_staff: storeId === 'yes_fresh' ? 3 : 2,
-            opening_time: '10:00',
-            closing_time: '20:00'
-        };
-
-        const employeeHours = new Map();
-        const weekSchedules = DataManager.getSchedules().filter(item => item.weekKey === weekKey);
-        const currentIndex = weekSchedules.findIndex(item =>
-            item.id === schedule.id || (item.storeId === storeId && item.weekKey === weekKey));
-        if (currentIndex >= 0) weekSchedules[currentIndex] = schedule;
-        else weekSchedules.push(schedule);
-        weekSchedules
-            .forEach(item => {
-                Object.values(item.shifts || {}).flat()
-                    .filter(shift => shift.requestStatus !== 'declined')
-                    .forEach(shift => employeeHours.set(
-                        shift.employeeId,
-                        (employeeHours.get(shift.employeeId) || 0) + DateUtils.calculateDuration(shift.start, shift.end)
-                    ));
-            });
-
-        employees.forEach(employee => {
-            const hours = employeeHours.get(employee.id) || 0;
-            if (Number.isFinite(employee.weeklyMaxHours) && hours > employee.weeklyMaxHours) {
-                warnings.push(`${employee.name}: ${DateUtils.formatDuration(hours)} geplant, maximal ${DateUtils.formatDuration(employee.weeklyMaxHours)}.`);
-            }
-            if (Number.isFinite(employee.weeklyTargetHours) && hours < employee.weeklyTargetHours) {
-                warnings.push(`${employee.name}: nur ${DateUtils.formatDuration(hours)} von ${DateUtils.formatDuration(employee.weeklyTargetHours)} Sollstunden.`);
-            }
-        });
-
-        const opening = DateUtils.parseTimeToMinutes(store.opening_time || '10:00');
-        const closing = DateUtils.parseTimeToMinutes(store.closing_time || '20:00');
-        const minimumStaff = Number(store.minimum_staff || (storeId === 'yes_fresh' ? 3 : 2));
-        DateUtils.DAY_KEYS.slice(0, 6).forEach((dayKey, dayIndex) => {
-            const ranges = (schedule.shifts?.[dayKey] || [])
-                .filter(shift => shift.requestStatus !== 'declined')
-                .map(shift => this.timeRange(shift.start, shift.end))
-                .filter(Boolean)
-                .map(range => ({ start: Math.max(opening, range.start), end: Math.min(closing, range.end) }))
-                .filter(range => range.end > range.start);
-            const points = [...new Set([opening, closing, ...ranges.flatMap(range => [range.start, range.end])])]
-                .sort((a, b) => a - b);
-            for (let index = 0; index < points.length - 1; index++) {
-                const start = points[index];
-                const end = points[index + 1];
-                if (end <= start) continue;
-                const midpoint = (start + end) / 2;
-                const coverage = ranges.filter(range => range.start <= midpoint && range.end >= midpoint).length;
-                if (coverage < minimumStaff) {
-                    warnings.push(`${DateUtils.DAYS_SHORT[dayIndex]} ${this.formatMinutesToTime(start)}–${this.formatMinutesToTime(end)}: nur ${coverage} von ${minimumStaff} benötigten Mitarbeitern.`);
-                }
-            }
-        });
-        return [...new Set(warnings)];
-    },
-
-    renderPlanningWarnings() {
-        const card = document.getElementById('planning-warnings-card');
-        const list = document.getElementById('planning-warnings-list');
-        const badge = document.getElementById('planning-warning-count');
-        if (!card || !list || !badge) return;
-        const schedule = DataManager.getScheduleForWeek(DateUtils.getWeekKey(this.currentWeek), this.adminStore);
-        const warnings = this.calculatePlanningWarnings(schedule, this.adminStore, this.currentWeek);
-        card.style.display = warnings.length > 0 ? 'block' : 'none';
-        badge.textContent = String(warnings.length);
-        list.innerHTML = warnings.map(warning => `<div class="planning-warning-item">⚠️ ${this.escapeHtml(warning)}</div>`).join('');
-    },
-
-    renderPlanningSettings() {
-        const store = DataManager.getStore?.(this.adminStore);
-        const minimumStaff = document.getElementById('planning-minimum-staff');
-        const openingTime = document.getElementById('planning-opening-time');
-        const closingTime = document.getElementById('planning-closing-time');
-        if (!store || !minimumStaff || !openingTime || !closingTime) return;
-        minimumStaff.value = String(store.minimum_staff || 2);
-        openingTime.value = store.opening_time || '10:00';
-        closingTime.value = store.closing_time || '20:00';
-    },
-
-    async savePlanningSettings() {
-        const minimumStaff = Number(document.getElementById('planning-minimum-staff')?.value);
-        const openingTime = document.getElementById('planning-opening-time')?.value || '';
-        const closingTime = document.getElementById('planning-closing-time')?.value || '';
-        if (!Number.isInteger(minimumStaff) || minimumStaff < 1 || minimumStaff > 20) {
-            this.showToast('Die Mindestbesetzung muss zwischen 1 und 20 liegen.', 'error');
-            return;
-        }
-        if (!/^\d{2}:\d{2}$/.test(openingTime) || !/^\d{2}:\d{2}$/.test(closingTime)
-            || DateUtils.parseTimeToMinutes(openingTime) >= DateUtils.parseTimeToMinutes(closingTime)) {
-            this.showToast('Bitte gültige Öffnungszeiten eingeben.', 'error');
-            return;
-        }
-        try {
-            await DataManager.saveStorePlanningSettings(this.adminStore, {
-                minimumStaff,
-                openingTime,
-                closingTime
-            });
-            this.renderPlanningWarnings();
-            this.showToast('Besetzungsregeln gespeichert.', 'success');
-        } catch (error) {
-            this.showToast(error?.message || 'Besetzungsregeln konnten nicht gespeichert werden.', 'error');
-        }
     },
 
     renderMonthlyEarnings() {
@@ -2580,7 +2464,27 @@ const App = {
     updateWeekDisplay() {
         const display = DateUtils.formatWeekDisplay(this.currentWeek);
         document.getElementById('week-display').textContent = display;
-        document.getElementById('admin-week-display').textContent = display;
+        const adminWeekLabel = document.getElementById('admin-week-label');
+        const adminWeekContext = document.getElementById('admin-week-context');
+        if (adminWeekLabel && adminWeekContext) {
+            const currentWeekKey = DateUtils.getWeekKey(new Date());
+            const displayedWeekKey = DateUtils.getWeekKey(this.currentWeek);
+            const differenceInWeeks = Math.round(
+                (DateUtils.getWeekDates(this.currentWeek)[0] - DateUtils.getWeekDates(new Date())[0]) / (7 * 24 * 60 * 60 * 1000)
+            );
+            const context = displayedWeekKey === currentWeekKey
+                ? ['Aktuelle Woche', 'current']
+                : differenceInWeeks === -1
+                    ? ['Letzte Woche', 'past']
+                    : differenceInWeeks === 1
+                        ? ['Nächste Woche', 'future']
+                        : differenceInWeeks < 0
+                            ? ['Vergangene Woche', 'past']
+                            : ['Kommende Woche', 'future'];
+            adminWeekLabel.textContent = display;
+            adminWeekContext.textContent = context[0];
+            adminWeekContext.className = `week-context-badge ${context[1]}`;
+        }
         document.getElementById('my-week-display').textContent = display;
     },
 
@@ -3335,8 +3239,6 @@ const App = {
         if (printWeek) {
             printWeek.textContent = `${DateUtils.formatWeekDisplay(this.currentWeek)} · ${DataManager.getStoreName(this.adminStore)}`;
         }
-        this.renderPlanningWarnings();
-        this.renderPlanningSettings();
     },
 
     printSchedule() {
@@ -3696,9 +3598,7 @@ const App = {
         }
     },
 
-     pendingCopyContext: null,
-
-     copyLastWeek() {
+     /* copyLastWeek() {
          // Get last week's date
          const lastWeekDate = new Date(this.currentWeek);
          lastWeekDate.setDate(lastWeekDate.getDate() - 7);
@@ -3803,9 +3703,9 @@ const App = {
          }
 
          this.showModal('copy-week-modal');
-     },
+     }, */
 
-     async applyCopyWeek(skipConflicts) {
+     /* async applyCopyWeek(skipConflicts) {
          if (!this.pendingCopyContext) return;
 
          const { lastWeekKey, currentWeekKey, lastWeekSchedule, dates } = this.pendingCopyContext;
@@ -3903,7 +3803,7 @@ const App = {
          } else {
              this.showToast('Schichten von letzter Woche kopiert!', 'success');
          }
-     },
+     }, */
 
 
     updateReleaseButton() {
@@ -4029,21 +3929,15 @@ const App = {
             }
 
             const stores = Array.isArray(emp.stores) && emp.stores.length > 0 ? emp.stores : [emp.primaryStore || emp.store || storeId];
-            const storeChips = stores.map(s => `<span class="store-chip">${this.escapeHtml(DataManager.getStoreName(s))}</span>`).join('');
+            const storeNames = stores.map(s => this.escapeHtml(DataManager.getStoreName(s))).join(' · ');
             const accountStatus = emp.profileId
                 ? '<span class="absence-pill approved">Zugang angelegt</span>'
                 : '<span class="absence-pill pending">Nicht eingeladen</span>';
-            const accountDetail = emp.email
-                ? `<div class="employee-type">${this.escapeHtml(emp.email)}</div>`
-                : '';
-            const phoneDetail = emp.phone
-                ? `<div class="employee-type">${this.escapeHtml(emp.phone)}</div>`
-                : '<div class="employee-type">Keine Handynummer</div>';
             const hoursDetail = (Number.isFinite(emp.weeklyTargetHours) || Number.isFinite(emp.weeklyMaxHours))
-                ? `<div class="employee-type">Woche: ${Number.isFinite(emp.weeklyTargetHours) ? `${this.escapeHtml(emp.weeklyTargetHours)}h Soll` : 'kein Soll'} · ${Number.isFinite(emp.weeklyMaxHours) ? `${this.escapeHtml(emp.weeklyMaxHours)}h max.` : 'kein Maximum'}</div>`
+                ? `Woche: ${Number.isFinite(emp.weeklyTargetHours) ? `${this.escapeHtml(emp.weeklyTargetHours)}h Soll` : 'kein Soll'} · ${Number.isFinite(emp.weeklyMaxHours) ? `${this.escapeHtml(emp.weeklyMaxHours)}h max.` : 'kein Maximum'}`
                 : '';
             const inviteButton = emp.profileId
-                ? '<button class="btn btn-secondary btn-small" disabled>Eingeladen</button>'
+                ? ''
                 : `<button class="btn btn-primary btn-small" onclick="App.openInviteEmployee('${emp.id}', '${this.encodeActionData(emp.name)}')"><span class="btn-icon-inline">✉️</span> Einladen</button>`;
             const emailButton = emp.profileId && emp.email
                 ? `<button class="btn btn-secondary btn-small" onclick="App.openUpdateEmployeeEmail('${emp.id}', '${this.encodeActionData(emp.name)}')"><span class="btn-icon-inline">✉</span> Email ändern</button>`
@@ -4057,12 +3951,10 @@ const App = {
                             ${absenceBadge}
                             ${accountStatus}
                         </div>
-                        <div class="employee-meta">
-                            <div class="employee-stores">${storeChips}</div>
-                            <div class="employee-type">${emp.type === 'aushilfe' ? 'Aushilfe' : 'Festangestellt'}</div>
-                            ${accountDetail}
-                            ${phoneDetail}
-                            ${hoursDetail}
+                        <div class="employee-meta-line">
+                            <span>${storeNames}</span>
+                            <span>${emp.type === 'aushilfe' ? 'Aushilfe' : 'Festangestellt'}</span>
+                            ${hoursDetail ? `<span>${hoursDetail}</span>` : ''}
                         </div>
                     </div>
                     <div class="employee-actions">
@@ -4070,13 +3962,18 @@ const App = {
                             <span class="btn-icon-inline">📅</span> Abwesenheit
                         </button>
                         <button class="btn btn-secondary btn-small" onclick="App.openDefaultAvailabilityModal('${emp.id}')">
-                            <span class="btn-icon-inline">⏱️</span> Standard
+                            <span class="btn-icon-inline">⏱️</span> Standardzeiten
                         </button>
-                        <button class="btn btn-secondary btn-small" onclick="App.openEditEmployeeModal('${emp.id}')">✎</button>
+                        <button class="btn btn-secondary btn-small" onclick="App.openEditEmployeeModal('${emp.id}')">Bearbeiten</button>
                         ${inviteButton}
-                        ${emailButton}
-                        <button class="btn btn-danger btn-small" onclick="App.deleteEmployee('${emp.id}')">Archivieren</button>
-                        <button class="btn btn-danger btn-small btn-terminate" onclick="App.terminateEmployee('${emp.id}')">Entlassen</button>
+                        <details class="employee-more-actions">
+                            <summary>Mehr</summary>
+                            <div class="employee-more-menu">
+                                ${emailButton}
+                                <button class="btn btn-danger btn-small" onclick="App.deleteEmployee('${emp.id}')">Archivieren</button>
+                                <button class="btn btn-danger btn-small btn-terminate" onclick="App.terminateEmployee('${emp.id}')">Zugang entziehen</button>
+                            </div>
+                        </details>
                     </div>
                 </div>
             `;

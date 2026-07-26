@@ -55,8 +55,6 @@ Before deploying a new domain, add its URL to the Supabase Auth Site URL and Red
 ## Business Rules
 
 - **Part-time workers (Aushilfe)**: Max 18 hours per week
-- **Yes Fresh**: Minimum 3 employees per day
-- **Fresh Fries**: Minimum 2 employees per day
 - **Breaks**: Reminder for shifts longer than 6 hours
 
 ## Production Checklist

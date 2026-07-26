@@ -385,8 +385,7 @@ test('release validation blocks invalid and unresolved shifts', () => {
     vm.runInContext(`scheduleForTest.shifts.monday[0].requestStatus = 'none'`, context);
     const valid = vm.runInContext(`App.validateScheduleForRelease(scheduleForTest, 'fresh_fries')`, context);
     assert.deepEqual(Array.from(valid.errors), []);
-    assert.ok(valid.warnings.some(warning => warning.includes('benötigten Mitarbeitern')));
-    assert.ok(valid.warnings.some(warning => warning.includes('Test:') && warning.includes('maximal')));
+    assert.deepEqual(Array.from(valid.warnings), []);
 
     vm.runInContext(`scheduleForTest.shifts.monday[0].end = '10:00'`, context);
     const invalidTime = vm.runInContext(`App.validateScheduleForRelease(scheduleForTest, 'fresh_fries')`, context);
@@ -398,6 +397,10 @@ test('planning and notification release is wired end to end', () => {
     const app = fs.readFileSync(path.join(root, 'js/app.js'), 'utf8');
     const cloud = fs.readFileSync(path.join(root, 'js/cloud-data.js'), 'utf8');
     const serviceWorker = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
+    const shiftSwapPermissionMigration = fs.readFileSync(
+        path.join(root, 'supabase/migrations/20260726210000_fix_shift_swap_date_permission.sql'),
+        'utf8'
+    );
     const migration = fs.readFileSync(
         path.join(root, 'supabase/migrations/20260722222119_notification_and_planning_release.sql'),
         'utf8'
@@ -411,13 +414,15 @@ test('planning and notification release is wired end to end', () => {
     assert.match(html, /id="page-open-shifts"/);
     assert.match(html, /id="admin-workflow-list"/);
     assert.match(html, /id="page-admin-history"/);
-    assert.match(html, /id="save-planning-settings"/);
+    assert.doesNotMatch(html, /id="save-planning-settings"/);
     assert.doesNotMatch(html, /notification-sms-opt-in|Twilio|SMS/);
-    assert.match(app, /calculatePlanningWarnings/);
+    assert.doesNotMatch(app, /calculatePlanningWarnings/);
     assert.match(app, /sendAvailabilityReminder/);
     assert.match(cloud, /createShiftSwap/);
     assert.match(cloud, /reviewOpenShift/);
     assert.match(serviceWorker, /addEventListener\('push'/);
+    assert.match(shiftSwapPermissionMigration, /grant usage on schema private to authenticated/);
+    assert.match(shiftSwapPermissionMigration, /grant execute on function private\.shift_date\(text, text\) to authenticated, service_role/);
 
     for (const table of [
         'push_subscriptions',
