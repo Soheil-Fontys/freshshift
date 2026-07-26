@@ -1,12 +1,77 @@
 begin;
 
+-- Older FreshShift databases were created before the private helper schema
+-- was added to migrations. Keep this release compatible without exposing the
+-- trigger helper through the Data API.
+create schema if not exists private;
+revoke all on schema private from public, anon, authenticated;
+
+create or replace function private.set_updated_at()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+revoke all on function private.set_updated_at() from public, anon, authenticated;
+grant execute on function private.set_updated_at() to service_role;
+
+create table if not exists public.activity_log (
+  id bigint generated always as identity primary key,
+  actor_profile_id uuid references public.profiles(id) on delete set null,
+  actor_name text not null,
+  store_id text references public.stores(id) on delete set null,
+  week_key text check (week_key is null or week_key ~ '^[0-9]{4}-W[0-9]{2}$'),
+  action text not null,
+  details jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  check (jsonb_typeof(details) = 'object')
+);
+create index if not exists activity_log_created_idx on public.activity_log (created_at desc);
+create index if not exists activity_log_store_week_idx
+  on public.activity_log (store_id, week_key, created_at desc);
+alter table public.activity_log enable row level security;
+drop policy if exists activity_log_admin_select on public.activity_log;
+create policy activity_log_admin_select on public.activity_log
+  for select to authenticated using (public.is_admin());
+revoke all on table public.activity_log from public, anon;
+grant select on table public.activity_log to authenticated, service_role;
+grant usage, select on sequence public.activity_log_id_seq to service_role;
+
+create or replace function private.record_activity(
+  p_action text,
+  p_store_id text default null,
+  p_week_key text default null,
+  p_details jsonb default '{}'::jsonb
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  actor_id uuid := (select auth.uid());
+  actor_label text;
+begin
+  if actor_id is null then return; end if;
+  select coalesce(nullif(p.display_name, ''), nullif(p.email, ''), 'Benutzer')
+  into actor_label from public.profiles p where p.id = actor_id;
+  insert into public.activity_log (actor_profile_id, actor_name, store_id, week_key, action, details)
+  values (actor_id, coalesce(actor_label, 'Benutzer'), p_store_id, p_week_key, p_action, coalesce(p_details, '{}'::jsonb));
+end;
+$$;
+revoke all on function private.record_activity(text, text, text, jsonb)
+  from public, anon, authenticated;
+grant execute on function private.record_activity(text, text, text, jsonb) to service_role;
+
 -- Contact and planning limits are kept on the employee record. An admin may
--- enter a phone number, but only the employee can opt in to SMS from their own
--- signed-in account.
+-- store a phone number for employee administration.
 alter table public.employees
   add column if not exists phone_e164 text,
-  add column if not exists sms_opt_in boolean not null default false,
-  add column if not exists phone_confirmed_at timestamptz,
   add column if not exists weekly_target_hours numeric(5, 2),
   add column if not exists weekly_max_hours numeric(5, 2);
 
@@ -14,9 +79,6 @@ alter table public.employees
   drop constraint if exists employees_phone_e164_check,
   add constraint employees_phone_e164_check
     check (phone_e164 is null or phone_e164 ~ '^\+[1-9][0-9]{7,14}$'),
-  drop constraint if exists employees_phone_consent_check,
-  add constraint employees_phone_consent_check
-    check (not sms_opt_in or (phone_e164 is not null and phone_confirmed_at is not null)),
   drop constraint if exists employees_weekly_target_hours_check,
   add constraint employees_weekly_target_hours_check
     check (weekly_target_hours is null or weekly_target_hours between 0 and 80),
@@ -184,7 +246,7 @@ create table if not exists public.notification_deliveries (
   notification_id uuid not null references public.notifications(id) on delete cascade,
   recipient_profile_id uuid references public.profiles(id) on delete cascade,
   recipient_employee_id uuid references public.employees(id) on delete cascade,
-  channel text not null check (channel in ('push', 'sms')),
+  channel text not null check (channel = 'push'),
   status text not null default 'pending'
     check (status in ('pending', 'sending', 'sent', 'failed', 'skipped')),
   attempts integer not null default 0 check (attempts between 0 and 10),
@@ -451,7 +513,6 @@ declare
   normalized_name text := btrim(coalesce(p_name, ''));
   normalized_phone text := nullif(regexp_replace(coalesce(p_phone_e164, ''), '[^+0-9]', '', 'g'), '');
   normalized_stores text[];
-  old_phone text;
 begin
   if not public.is_admin() then
     raise exception 'Only administrators may save employees';
@@ -499,15 +560,12 @@ begin
       coalesce(p_weekly_max_hours, case when p_type = 'aushilfe' then 18 else null end)
     ) returning id into saved_employee_id;
   else
-    select phone_e164 into old_phone from public.employees where id = p_employee_id for update;
     update public.employees
     set name = normalized_name,
         type = p_type,
         hourly_rate = p_hourly_rate,
         default_availability_json = coalesce(p_default_availability, '{}'::jsonb),
         phone_e164 = normalized_phone,
-        sms_opt_in = case when normalized_phone is not distinct from old_phone then sms_opt_in else false end,
-        phone_confirmed_at = case when normalized_phone is not distinct from old_phone then phone_confirmed_at else null end,
         weekly_target_hours = p_weekly_target_hours,
         weekly_max_hours = coalesce(p_weekly_max_hours, case when p_type = 'aushilfe' then 18 else null end)
     where id = p_employee_id and active
@@ -531,40 +589,6 @@ grant execute on function public.save_employee_v2(
   uuid, text, text, numeric, jsonb, text[], text, text, numeric, numeric
 ) to authenticated, service_role;
 
-create or replace function public.save_my_notification_settings(
-  p_phone_e164 text,
-  p_sms_opt_in boolean
-)
-returns uuid
-language plpgsql
-security invoker
-set search_path = ''
-as $$
-declare
-  actor_employee_id uuid := public.current_employee_id();
-  normalized_phone text := nullif(regexp_replace(coalesce(p_phone_e164, ''), '[^+0-9]', '', 'g'), '');
-begin
-  if actor_employee_id is null then raise exception 'Active employee account required'; end if;
-  if normalized_phone is not null and normalized_phone !~ '^\+[1-9][0-9]{7,14}$' then
-    raise exception 'Bitte eine Nummer im internationalen Format eingeben, z.B. +491701234567';
-  end if;
-  if coalesce(p_sms_opt_in, false) and normalized_phone is null then
-    raise exception 'Für SMS wird eine Telefonnummer benötigt';
-  end if;
-
-  update public.employees
-  set phone_e164 = normalized_phone,
-      sms_opt_in = coalesce(p_sms_opt_in, false),
-      phone_confirmed_at = case when coalesce(p_sms_opt_in, false) then now() else null end
-  where id = actor_employee_id;
-  return actor_employee_id;
-end;
-$$;
-
-revoke all on function public.save_my_notification_settings(text, boolean) from public, anon;
-grant execute on function public.save_my_notification_settings(text, boolean)
-  to authenticated, service_role;
-
 create or replace function private.enqueue_notification_delivery()
 returns trigger
 language plpgsql
@@ -581,17 +605,6 @@ begin
     where e.id = new.target_employee_id and e.active and e.profile_id is not null
     on conflict do nothing;
 
-    if coalesce((new.payload ->> 'sms')::boolean, false) then
-      insert into public.notification_deliveries (
-        notification_id, recipient_profile_id, recipient_employee_id, channel
-      )
-      select new.id, e.profile_id, e.id, 'sms'
-      from public.employees e
-      where e.id = new.target_employee_id
-        and e.active and e.sms_opt_in and e.phone_e164 is not null
-        and e.phone_confirmed_at is not null
-      on conflict do nothing;
-    end if;
   else
     insert into public.notification_deliveries (
       notification_id, recipient_profile_id, recipient_employee_id, channel
@@ -647,7 +660,6 @@ begin
     jsonb_build_object(
       'message', 'Bitte trage deine Verfügbarkeit für ' || p_week_key || ' ein.',
       'weekKey', p_week_key,
-      'sms', true,
       'url', '/#availability'
     )
   ) returning id into notification_id;
@@ -725,7 +737,6 @@ begin
         'swapRequestId', request_id,
         'weekKey', shift_row.week_key,
         'dayKey', shift_row.day_key,
-        'sms', urgent,
         'url', '/#open-shifts'
       )
     );
@@ -890,9 +901,9 @@ begin
   insert into public.notifications (store_id, target_role, target_employee_id, type, payload)
   values
     (shift_row.store_id, 'employee', shift_row.employee_id, 'shift_swap_approved',
-      jsonb_build_object('message', 'Deine Schicht wurde erfolgreich übernommen.', 'weekKey', shift_row.week_key, 'dayKey', shift_row.day_key, 'sms', true)),
+      jsonb_build_object('message', 'Deine Schicht wurde erfolgreich übernommen.', 'weekKey', shift_row.week_key, 'dayKey', shift_row.day_key)),
     (shift_row.store_id, 'employee', request_row.claimed_by_employee_id, 'shift_swap_approved',
-      jsonb_build_object('message', 'Die Schicht ' || shift_row.start || '–' || shift_row."end" || ' gehört jetzt dir.', 'weekKey', shift_row.week_key, 'dayKey', shift_row.day_key, 'sms', true));
+      jsonb_build_object('message', 'Die Schicht ' || shift_row.start || '–' || shift_row."end" || ' gehört jetzt dir.', 'weekKey', shift_row.week_key, 'dayKey', shift_row.day_key));
   return p_request_id;
 end;
 $$;
@@ -952,7 +963,7 @@ begin
       jsonb_build_object(
         'message', 'Offene Schicht: ' || p_shift.start || '–' || p_shift."end",
         'openShiftId', open_id, 'weekKey', p_shift.week_key, 'dayKey', p_shift.day_key,
-        'sms', urgent, 'url', '/#open-shifts'
+        'url', '/#open-shifts'
       )
     );
   end loop;
@@ -984,7 +995,7 @@ begin
   insert into public.notifications (store_id, target_role, target_employee_id, type, payload)
   values (
     shift_row.store_id, 'employee', shift_row.employee_id, 'shift_removed',
-    jsonb_build_object('message', 'Deine Schicht ' || shift_row.start || '–' || shift_row."end" || ' wurde entfernt.', 'weekKey', shift_row.week_key, 'dayKey', shift_row.day_key, 'sms', true)
+    jsonb_build_object('message', 'Deine Schicht ' || shift_row.start || '–' || shift_row."end" || ' wurde entfernt.', 'weekKey', shift_row.week_key, 'dayKey', shift_row.day_key)
   );
   return open_id;
 end;
@@ -1103,7 +1114,7 @@ begin
   insert into public.notifications (store_id, target_role, target_employee_id, type, payload)
   values (
     open_row.store_id, 'employee', open_row.claimed_by_employee_id, 'open_shift_assigned',
-    jsonb_build_object('message', 'Die offene Schicht ' || open_row.start || '–' || open_row."end" || ' gehört jetzt dir.', 'weekKey', open_row.week_key, 'dayKey', open_row.day_key, 'sms', true)
+    jsonb_build_object('message', 'Die offene Schicht ' || open_row.start || '–' || open_row."end" || ' gehört jetzt dir.', 'weekKey', open_row.week_key, 'dayKey', open_row.day_key)
   );
   return p_open_shift_id;
 end;
@@ -1194,7 +1205,7 @@ begin
         insert into public.notifications (store_id, target_role, target_employee_id, type, payload)
         values (
           current_shift.store_id, 'employee', current_shift.employee_id, 'schedule_published',
-          jsonb_build_object('message', 'Dein neuer Wochenplan wurde freigegeben.', 'weekKey', current_shift.week_key, 'sms', false, 'url', '/#schedule')
+          jsonb_build_object('message', 'Dein neuer Wochenplan wurde freigegeben.', 'weekKey', current_shift.week_key, 'url', '/#schedule')
         );
         notified_employee_ids := array_append(notified_employee_ids, current_shift.employee_id);
       end if;
@@ -1219,7 +1230,7 @@ begin
         insert into public.notifications (store_id, target_role, target_employee_id, type, payload)
         values (
           snap.store_id, 'employee', snap.employee_id, 'shift_removed',
-          jsonb_build_object('message', 'Deine Schicht ' || snap.start || '–' || snap."end" || ' wurde entfernt.', 'weekKey', snap.week_key, 'dayKey', snap.day_key, 'sms', urgent, 'url', '/#schedule')
+          jsonb_build_object('message', 'Deine Schicht ' || snap.start || '–' || snap."end" || ' wurde entfernt.', 'weekKey', snap.week_key, 'dayKey', snap.day_key, 'url', '/#schedule')
         );
         insert into public.shift_change_history (
           schedule_id, shift_id, store_id, week_key, day_key, employee_id,
@@ -1233,7 +1244,7 @@ begin
         insert into public.notifications (store_id, target_role, target_employee_id, type, payload)
         values (
           snap.store_id, 'employee', snap.employee_id, 'shift_changed',
-          jsonb_build_object('message', 'Schicht geändert: ' || snap.start || '–' || snap."end" || ' → ' || current_shift.start || '–' || current_shift."end", 'weekKey', snap.week_key, 'dayKey', snap.day_key, 'sms', urgent, 'url', '/#schedule')
+          jsonb_build_object('message', 'Schicht geändert: ' || snap.start || '–' || snap."end" || ' → ' || current_shift.start || '–' || current_shift."end", 'weekKey', snap.week_key, 'dayKey', snap.day_key, 'url', '/#schedule')
         );
         insert into public.shift_change_history (
           schedule_id, shift_id, store_id, week_key, day_key, employee_id,
@@ -1261,7 +1272,7 @@ begin
       insert into public.notifications (store_id, target_role, target_employee_id, type, payload)
       values (
         current_shift.store_id, 'employee', current_shift.employee_id, 'shift_added',
-        jsonb_build_object('message', 'Neue Schicht: ' || current_shift.start || '–' || current_shift."end", 'weekKey', current_shift.week_key, 'dayKey', current_shift.day_key, 'sms', urgent, 'url', '/#schedule')
+        jsonb_build_object('message', 'Neue Schicht: ' || current_shift.start || '–' || current_shift."end", 'weekKey', current_shift.week_key, 'dayKey', current_shift.day_key, 'url', '/#schedule')
       );
       insert into public.shift_change_history (
         schedule_id, shift_id, store_id, week_key, day_key, employee_id,
@@ -1309,7 +1320,6 @@ returns table (
   title text,
   message text,
   target_url text,
-  phone_e164 text,
   push_subscriptions jsonb
 )
 language plpgsql
@@ -1317,7 +1327,7 @@ security definer
 set search_path = ''
 as $$
 begin
-  if p_channel is not null and p_channel not in ('push', 'sms') then
+  if p_channel is not null and p_channel <> 'push' then
     raise exception 'Invalid notification channel';
   end if;
   return query
@@ -1325,7 +1335,8 @@ begin
     select nd.id
     from public.notification_deliveries nd
     where nd.status in ('pending', 'failed') and nd.attempts < 3
-      and (p_channel is null or nd.channel = p_channel)
+      and nd.channel = 'push'
+      and (p_channel is null or p_channel = 'push')
     order by nd.created_at
     limit least(greatest(coalesce(p_limit, 50), 1), 100)
     for update skip locked
@@ -1344,7 +1355,6 @@ begin
     'FreshShift'::text,
     coalesce(n.payload ->> 'message', 'Neue FreshShift-Mitteilung'),
     coalesce(n.payload ->> 'url', '/')::text,
-    e.phone_e164,
     coalesce((
       select jsonb_agg(jsonb_build_object(
         'id', ps.id, 'endpoint', ps.endpoint, 'p256dh', ps.p256dh, 'auth', ps.auth
@@ -1352,8 +1362,7 @@ begin
       where ps.profile_id = u.recipient_profile_id and ps.enabled
     ), '[]'::jsonb)
   from updated u
-  join public.notifications n on n.id = u.notification_id
-  left join public.employees e on e.id = u.recipient_employee_id;
+  join public.notifications n on n.id = u.notification_id;
 end;
 $$;
 
@@ -1373,11 +1382,7 @@ as $$
   from vault.decrypted_secrets ds
   where ds.name in (
     'freshshift_vapid_public_key',
-    'freshshift_vapid_private_key',
-    'freshshift_twilio_account_sid',
-    'freshshift_twilio_auth_token',
-    'freshshift_twilio_messaging_service_sid',
-    'freshshift_twilio_from_number'
+    'freshshift_vapid_private_key'
   )
 $$;
 

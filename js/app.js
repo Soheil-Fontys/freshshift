@@ -283,8 +283,6 @@ const App = {
         const clearDefaultBtn = document.getElementById('clear-default-availability');
         if (clearDefaultBtn) clearDefaultBtn.addEventListener('click', () => this.clearDefaultAvailability());
 
-        const saveNotificationSettings = document.getElementById('save-notification-settings');
-        if (saveNotificationSettings) saveNotificationSettings.addEventListener('click', () => this.saveNotificationSettings());
         const togglePush = document.getElementById('toggle-push-notifications');
         if (togglePush) togglePush.addEventListener('click', () => this.togglePushNotifications());
         const employeeNotificationsRead = document.getElementById('employee-notifications-read');
@@ -654,14 +652,9 @@ const App = {
     },
 
     renderNotificationSettings() {
-        const phoneInput = document.getElementById('notification-phone');
-        const smsInput = document.getElementById('notification-sms-opt-in');
         const status = document.getElementById('push-status');
         const button = document.getElementById('toggle-push-notifications');
-        if (!phoneInput || !smsInput || !status || !button || !this.currentUser) return;
-
-        phoneInput.value = this.currentUser.phone || '';
-        smsInput.checked = Boolean(this.currentUser.smsOptIn);
+        if (!status || !button || !this.currentUser) return;
 
         if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
             status.textContent = 'Nicht unterstützt';
@@ -682,24 +675,6 @@ const App = {
             .catch(() => {
                 status.textContent = 'Status unbekannt';
             });
-    },
-
-    async saveNotificationSettings() {
-        const phone = this.normalizePhone(document.getElementById('notification-phone')?.value);
-        const smsOptIn = Boolean(document.getElementById('notification-sms-opt-in')?.checked);
-        if (phone && !/^\+[1-9]\d{7,14}$/.test(phone)) {
-            this.showToast('Bitte eine gültige Handynummer eingeben.', 'error');
-            return;
-        }
-        try {
-            this.currentUser = await DataManager.saveMyNotificationSettings(phone, smsOptIn);
-            this.renderNotificationSettings();
-            this.showToast(smsOptIn
-                ? 'Nummer gespeichert. Wichtige SMS sind aktiviert.'
-                : 'Benachrichtigungseinstellungen gespeichert.', 'success');
-        } catch (error) {
-            this.showToast(error?.message || 'Einstellungen konnten nicht gespeichert werden.', 'error');
-        }
     },
 
     urlBase64ToUint8Array(value) {
@@ -1907,7 +1882,7 @@ const App = {
             <div class="missing-avail-item">
                 <div>
                     <span class="employee-name">${this.escapeHtml(emp.name)}</span>
-                    <span class="missing-label">Noch nicht eingereicht${emp.smsOptIn ? ' · Push + SMS' : ' · Push'}</span>
+                    <span class="missing-label">Noch nicht eingereicht · Push</span>
                 </div>
                 <button class="btn btn-primary btn-small" onclick="App.sendAvailabilityReminder('${emp.id}', '${nextWeekKey}')">
                     Erinnern
@@ -4061,7 +4036,7 @@ const App = {
                 ? `<div class="employee-type">${this.escapeHtml(emp.email)}</div>`
                 : '';
             const phoneDetail = emp.phone
-                ? `<div class="employee-type">${this.escapeHtml(emp.phone)} · ${emp.smsOptIn ? 'SMS aktiv' : 'SMS nicht bestätigt'}</div>`
+                ? `<div class="employee-type">${this.escapeHtml(emp.phone)}</div>`
                 : '<div class="employee-type">Keine Handynummer</div>';
             const hoursDetail = (Number.isFinite(emp.weeklyTargetHours) || Number.isFinite(emp.weeklyMaxHours))
                 ? `<div class="employee-type">Woche: ${Number.isFinite(emp.weeklyTargetHours) ? `${this.escapeHtml(emp.weeklyTargetHours)}h Soll` : 'kein Soll'} · ${Number.isFinite(emp.weeklyMaxHours) ? `${this.escapeHtml(emp.weeklyMaxHours)}h max.` : 'kein Maximum'}</div>`

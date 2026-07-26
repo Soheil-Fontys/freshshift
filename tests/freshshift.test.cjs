@@ -406,7 +406,7 @@ test('planning and notification release is wired end to end', () => {
     assert.match(html, /id="admin-workflow-list"/);
     assert.match(html, /id="page-admin-history"/);
     assert.match(html, /id="save-planning-settings"/);
-    assert.match(html, /id="notification-sms-opt-in"/);
+    assert.doesNotMatch(html, /notification-sms-opt-in|Twilio|SMS/);
     assert.match(app, /calculatePlanningWarnings/);
     assert.match(app, /sendAvailabilityReminder/);
     assert.match(cloud, /createShiftSwap/);
@@ -425,7 +425,7 @@ test('planning and notification release is wired end to end', () => {
     assert.match(migration, /get_notification_service_config/);
     assert.match(migration, /claim_notification_deliveries/);
     assert.match(dispatcher, /verifyOtp|createClient/);
-    assert.match(dispatcher, /api\.twilio\.com/);
+    assert.doesNotMatch(dispatcher, /twilio|sms|phone_e164/i);
     assert.match(dispatcher, /web-push@3\.6\.7/);
     assert.match(dispatcher, /callerIsAdmin/);
     assert.match(dispatcher, /Admin access required/);

@@ -1,6 +1,5 @@
 // Supabase Edge Function: dispatch-notifications
-// Delivers already-authorized FreshShift notification jobs through Web Push
-// and, for urgent messages with explicit employee consent, Twilio SMS.
+// Delivers already-authorized FreshShift notification jobs through Web Push.
 
 import { createClient } from "npm:@supabase/supabase-js@2.110.7";
 import webPush from "npm:web-push@3.6.7";
@@ -18,14 +17,13 @@ const allowedOrigins = new Set([
 
 type Delivery = {
   delivery_id: string;
-  channel: "push" | "sms";
+  channel: "push";
   recipient_profile_id: string | null;
   recipient_employee_id: string | null;
   notification_type: string;
   title: string;
   message: string;
   target_url: string;
-  phone_e164: string | null;
   push_subscriptions: Array<{
     id: string;
     endpoint: string;
@@ -107,15 +105,11 @@ Deno.serve(async (req) => {
   const config = (providerConfig ?? {}) as Record<string, string>;
   const vapidPublicKey = config.freshshift_vapid_public_key ?? "";
   const vapidPrivateKey = config.freshshift_vapid_private_key ?? "";
-  const twilioAccountSid = config.freshshift_twilio_account_sid ?? "";
-  const twilioAuthToken = config.freshshift_twilio_auth_token ?? "";
-  const twilioMessagingServiceSid = config.freshshift_twilio_messaging_service_sid ?? "";
-  const twilioFromNumber = config.freshshift_twilio_from_number ?? "";
   const { data: deliveries, error: claimError } = await adminClient
     .rpc("claim_notification_deliveries", {
       p_limit: 50,
-      // The caller was verified as an admin above. The database channel filter
-      // remains as a second boundary for future scheduled dispatchers.
+      // The caller was verified as an admin above. The database function only
+      // returns pending Web Push deliveries.
       p_channel: null,
     });
   if (claimError) {
@@ -185,41 +179,6 @@ Deno.serve(async (req) => {
             status = "failed";
             errorMessage = errors.join("; ").slice(0, 1000) || "Push delivery failed";
           }
-        }
-      } else {
-        if (!delivery.phone_e164) {
-          errorMessage = "No confirmed SMS number";
-        } else if (!twilioAccountSid || !twilioAuthToken ||
-          (!twilioMessagingServiceSid && !twilioFromNumber)) {
-          errorMessage = "SMS provider is not configured";
-        } else {
-          const form = new URLSearchParams({
-            To: delivery.phone_e164,
-            Body: `FreshShift: ${delivery.message}`,
-          });
-          if (twilioMessagingServiceSid) {
-            form.set("MessagingServiceSid", twilioMessagingServiceSid);
-          } else {
-            form.set("From", twilioFromNumber);
-          }
-          const twilioResponse = await fetch(
-            `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(twilioAccountSid)}/Messages.json`,
-            {
-              method: "POST",
-              headers: {
-                Authorization: `Basic ${btoa(`${twilioAccountSid}:${twilioAuthToken}`)}`,
-                "Content-Type": "application/x-www-form-urlencoded",
-              },
-              body: form,
-            },
-          );
-          const twilioBody = await twilioResponse.json().catch(() => ({})) as {
-            sid?: string;
-            message?: string;
-          };
-          if (!twilioResponse.ok) throw new Error(twilioBody.message || "Twilio rejected the SMS");
-          status = "sent";
-          externalId = twilioBody.sid ?? null;
         }
       }
     } catch (error) {

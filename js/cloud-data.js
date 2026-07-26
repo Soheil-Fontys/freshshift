@@ -63,8 +63,6 @@
             profileId: row.profile_id,
             email: row.email,
             phone: row.phone_e164 || '',
-            smsOptIn: Boolean(row.sms_opt_in),
-            phoneConfirmedAt: row.phone_confirmed_at || null,
             active: row.active !== false,
             archivedAt: row.archived_at || null,
             terminatedAt: row.terminated_at || null,
@@ -265,7 +263,7 @@
 
         const results = await Promise.all([
             supabase.from('stores').select('id,name,minimum_staff,opening_time,closing_time').order('name'),
-            supabase.from('employees').select('id,name,type,hourly_rate,weekly_target_hours,weekly_max_hours,profile_id,email,phone_e164,sms_opt_in,phone_confirmed_at,active,archived_at,terminated_at,terminated_by,default_availability_json').order('name'),
+            supabase.from('employees').select('id,name,type,hourly_rate,weekly_target_hours,weekly_max_hours,profile_id,email,phone_e164,active,archived_at,terminated_at,terminated_by,default_availability_json').order('name'),
             supabase.from('employee_stores').select('employee_id,store_id,is_primary'),
             supabase.from('availabilities').select('*'),
             supabase.from('schedules').select('*'),
@@ -586,16 +584,6 @@
             });
             await loadCloudData();
             return result;
-        },
-
-        async saveMyNotificationSettings(phone, smsOptIn) {
-            if (!currentEmployee) throw new Error('Aktiver Mitarbeiterzugang erforderlich.');
-            unwrap(await requireClient().rpc('save_my_notification_settings', {
-                p_phone_e164: phone || null,
-                p_sms_opt_in: Boolean(smsOptIn)
-            }), 'Benachrichtigungseinstellungen konnten nicht gespeichert werden.');
-            await loadCloudData();
-            return currentEmployee;
         },
 
         getPushSubscriptions() {
