@@ -91,12 +91,16 @@ begin
     raise exception 'Bitte gib gültige unterschiedliche Zeiten ein';
   end if;
 
-  select ss.*, s.released
-  into shift_row, schedule_released
+  select ss.*
+  into shift_row
   from public.schedule_shifts ss
-  join public.schedules s on s.id = ss.schedule_id
   where ss.id = p_shift_id
   for update of ss;
+
+  select s.released
+  into schedule_released
+  from public.schedules s
+  where s.id = shift_row.schedule_id;
 
   if shift_row.id is null or not schedule_released then
     raise exception 'Diese Schicht ist nicht mehr veröffentlicht';
