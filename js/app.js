@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 53670)
-Total output lines: 4619
-
 /**
  * FreshShift - Main Application
  * Manual scheduling with deviation tracking
@@ -2119,7 +2116,298 @@ const App = {
             document.getElementById('calendar-subscription-url').value = this.calendarSubscriptionUrl;
             this.showModal('calendar-subscription-modal');
         } catch (error) {
-            this.showToast(error?.message || 'Kalender-Link konnte nicht erstellt werden.'…3670 tokens truncated…        // Update tab active state
+            this.showToast(error?.message || 'Kalender-Link konnte nicht erstellt werden.', 'error');
+        }
+    },
+
+    async copyCalendarSubscriptionLink() {
+        const input = document.getElementById('calendar-subscription-url');
+        const url = this.calendarSubscriptionUrl || input?.value;
+        if (!url) return;
+        try {
+            await navigator.clipboard.writeText(url);
+            this.showToast('Kalender-Link kopiert.', 'success');
+        } catch {
+            input?.select();
+            this.showToast('Link markiert. Bitte kopiere ihn manuell.', 'info');
+        }
+    },
+
+    openCalendarSubscription() {
+        if (!this.calendarSubscriptionUrl) return;
+        const webcalUrl = this.calendarSubscriptionUrl.replace(/^https?:\/\//, 'webcal://');
+        window.location.assign(webcalUrl);
+    },
+
+    renderAdminWorkflows() {
+        const container = document.getElementById('admin-workflow-list');
+        const badge = document.getElementById('workflow-count');
+        if (!container || !badge) return;
+        const openClaims = (DataManager.getOpenShifts?.() || []).filter(item =>
+            item.storeId === this.adminStore && item.status === 'claimed');
+        const swapClaims = (DataManager.getShiftSwaps?.() || []).filter(item =>
+            item.storeId === this.adminStore && item.status === 'claimed');
+        const planChanges = (DataManager.getShiftChangeRequests?.() || []).filter(item =>
+            item.storeId === this.adminStore && item.status === 'pending');
+        const items = [
+            ...openClaims.map(item => ({ kind: 'open', item })),
+            ...swapClaims.map(item => ({ kind: 'swap', item })),
+            ...planChanges.map(item => ({ kind: 'plan-change', item: {
+                ...item,
+                start: item.originalStart,
+                end: item.originalEnd
+            } }))
+        ];
+        badge.textContent = String(items.length);
+        container.innerHTML = items.length ? items.map(({ kind, item }) => {
+            const claimant = kind === 'plan-change'
+                ? this.getEmployeeName(item.employeeId)
+                : this.getEmployeeName(item.claimedByEmployeeId);
+            let display = item;
+            if (kind === 'swap') {
+                const shift = DataManager.getSchedules().flatMap(schedule => Object.values(schedule.shifts || {}).flat())
+                    .find(candidate => candidate.id === item.shiftId);
+                display = { ...item, start: shift?.start || '', end: shift?.end || '' };
+            }
+            return `
+                <div class="workflow-item">
+                    <div>
+                        <div class="workflow-title">${kind === 'open' ? 'Offene Schicht' : kind === 'swap' ? 'Tauschanfrage' : 'Planänderung'} · ${this.escapeHtml(this.workflowSummary(display))}</div>
+                        <div class="workflow-meta">${kind === 'plan-change'
+                            ? `${this.escapeHtml(claimant)}: ${this.escapeHtml(item.originalStart)}–${this.escapeHtml(item.originalEnd)} → ${this.escapeHtml(item.requestedStart)}–${this.escapeHtml(item.requestedEnd)}`
+                            : `${this.escapeHtml(claimant)} möchte übernehmen`}</div>
+                        ${kind === 'plan-change' && item.reason ? `<div class="workflow-meta">${this.escapeHtml(item.reason)}</div>` : ''}
+                    </div>
+                    <div class="request-actions">
+                        <button class="btn btn-success btn-small" onclick="App.reviewWorkflow('${kind}', '${item.id}', true)">Bestätigen</button>
+                        <button class="btn btn-danger btn-small" onclick="App.reviewWorkflow('${kind}', '${item.id}', false)">Ablehnen</button>
+                    </div>
+                </div>
+            `;
+        }).join('') : '<div class="empty-state small">Keine offenen Bestätigungen</div>';
+    },
+
+    async reviewWorkflow(kind, id, approve) {
+        const note = approve ? '' : (prompt('Grund für die Ablehnung (optional)', '') ?? null);
+        if (!approve && note === null) return;
+        try {
+            if (kind === 'open') await DataManager.reviewOpenShift(id, approve, note);
+            else if (kind === 'swap') await DataManager.reviewShiftSwap(id, approve, note);
+            else await DataManager.reviewShiftChangeRequest(id, approve, note);
+            this.renderAdminDashboard();
+            this.renderAdminView();
+            this.showToast(approve ? 'Anfrage bestätigt.' : 'Anfrage abgelehnt.', 'success');
+        } catch (error) {
+            this.showToast(error?.message || 'Übernahme konnte nicht bearbeitet werden.', 'error');
+        }
+    },
+
+    renderShiftHistory() {
+        const container = document.getElementById('shift-history-list');
+        if (!container) return;
+        const history = (DataManager.getShiftHistory?.() || []).filter(item =>
+            !this.adminStore || item.storeId === this.adminStore);
+        const labels = {
+            published: 'veröffentlicht',
+            added: 'hinzugefügt',
+            time_changed: 'Zeit geändert',
+            removed: 'entfernt',
+            reassigned: 'neu zugeteilt',
+            opened: 'als offen markiert',
+            swap_approved: 'getauscht',
+            open_shift_assigned: 'offene Schicht besetzt'
+        };
+        container.innerHTML = history.length ? history.map(item => {
+            const before = item.before?.start ? `${item.before.start}–${item.before.end}` : '';
+            const after = item.after?.start ? `${item.after.start}–${item.after.end}` : '';
+            const times = before && after ? `${before} → ${after}` : (after || before);
+            const date = this.getWorkflowDate(item.weekKey, item.dayKey);
+            return `
+                <div class="history-item">
+                    <div class="history-main">
+                        <strong>${this.escapeHtml(item.employeeName)}</strong>
+                        <span>${this.escapeHtml(labels[item.changeType] || item.changeType)}</span>
+                    </div>
+                    <div class="history-meta">
+                        ${date ? DateUtils.formatDate(date) : this.escapeHtml(item.weekKey)}${times ? ` · ${this.escapeHtml(times)}` : ''} · ${this.formatTimestamp(item.createdAt)}
+                    </div>
+                </div>
+            `;
+        }).join('') : '<div class="empty-state">Noch keine veröffentlichten Schichtänderungen</div>';
+    },
+
+    renderAdminWeekStatus(schedule, employees) {
+        const container = document.getElementById('admin-week-status');
+        
+        if (!schedule) {
+            container.innerHTML = `
+                <div class="status-warning">
+                    <span class="status-icon">⚠️</span>
+                    <span>Noch kein Wochenplan erstellt</span>
+                </div>
+            `;
+            return;
+        }
+        
+        // Count shifts
+        let totalShifts = 0;
+        let totalHours = 0;
+        
+        DateUtils.DAY_KEYS.forEach(dayKey => {
+                const dayShifts = schedule.shifts?.[dayKey] || [];
+                const activeShifts = dayShifts.filter(s => s.requestStatus !== 'declined');
+                totalShifts += activeShifts.length;
+                activeShifts.forEach(shift => {
+                    totalHours += DateUtils.calculateDuration(shift.start, shift.end);
+                });
+        });
+        
+        const statusClass = schedule.released ? 'status-success' : 'status-pending';
+        const statusText = schedule.released ? 'Plan freigegeben' : 'Plan nicht freigegeben';
+        const statusIcon = schedule.released ? '✓' : '⏳';
+        
+        container.innerHTML = `
+            <div class="${statusClass}">
+                <span class="status-icon">${statusIcon}</span>
+                <span>${statusText}</span>
+            </div>
+            <div class="week-status-stats">
+                <span>${totalShifts} Schichten</span>
+                <span>${DateUtils.formatDuration(totalHours)}</span>
+            </div>
+        `;
+    },
+
+    renderAdminTodayShifts(schedule, today) {
+        const container = document.getElementById('admin-today-shifts');
+        const todayKey = DateUtils.getTodayKey();
+        const todayShifts = (schedule?.shifts?.[todayKey] || [])
+            .filter(shift => shift.requestStatus !== 'declined');
+        
+        if (todayShifts.length === 0) {
+            container.innerHTML = '<div class="empty-today">Keine Schichten heute</div>';
+            return;
+        }
+        
+        container.innerHTML = todayShifts.map(shift => {
+            let deviationBadge = '';
+            if (shift.deviation) {
+                if (shift.deviation.lateMinutes) {
+                    deviationBadge = `<span class="deviation-badge late">+${this.escapeHtml(shift.deviation.lateMinutes)}m</span>`;
+                } else if (shift.deviation.earlyMinutes) {
+                    deviationBadge = `<span class="deviation-badge early">-${this.escapeHtml(shift.deviation.earlyMinutes)}m</span>`;
+                }
+            }
+            
+            return `
+                <div class="today-shift-item">
+                    <span class="shift-employee">${this.escapeHtml(this.getEmployeeName(shift.employeeId, shift.employeeName))}</span>
+                    <span class="shift-time">${shift.start} – ${shift.end}</span>
+                    ${deviationBadge}
+                </div>
+            `;
+        }).join('');
+    },
+
+    renderAdminQuickStats(employees, schedule, availabilities) {
+        document.getElementById('stat-total-employees').textContent = employees.length;
+        
+        // Count week shifts and hours
+        let totalShifts = 0;
+        let totalHours = 0;
+        
+        if (schedule) {
+            DateUtils.DAY_KEYS.forEach(dayKey => {
+                const dayShifts = schedule.shifts?.[dayKey] || [];
+                totalShifts += dayShifts.length;
+                dayShifts.forEach(shift => {
+                    totalHours += DateUtils.calculateDuration(shift.start, shift.end);
+                });
+            });
+        }
+        
+        document.getElementById('stat-week-shifts').textContent = totalShifts;
+        document.getElementById('stat-week-hours').textContent = DateUtils.formatDuration(totalHours);
+        document.getElementById('stat-availabilities').textContent = availabilities.length;
+    },
+
+    updateAdminNotifications() {
+        const notifications = DataManager.getUnreadNotifications()
+            .filter(n => (n.target !== 'employee') && (!n.storeId || n.storeId === this.adminStore));
+
+        const badge = document.getElementById('notification-badge');
+        const count = document.getElementById('notification-count');
+        const card = document.getElementById('notifications-card');
+        const list = document.getElementById('notifications-list');
+        
+        if (notifications.length > 0) {
+            badge.style.display = 'inline-flex';
+            count.textContent = notifications.length;
+            card.style.display = 'block';
+            
+            list.innerHTML = notifications.map(n => {
+                let icon = '🔔';
+                if (n.type === 'early') icon = '🚪';
+                else if (n.type === 'late') icon = '⏰';
+                else if (n.type === 'shift_request_response') icon = '✅';
+                else if (n.type === 'absence_request') icon = '📅';
+                else if (n.type === 'absence_notice') icon = '🤒';
+                else if (n.type === 'absence_cancelled') icon = '↩️';
+
+                const titleName = n.employeeName ? `${this.escapeHtml(n.employeeName)}: ` : '';
+
+                const needsAbsenceActions = n.type === 'absence_request' && n.absenceId;
+                let actions = needsAbsenceActions ? (() => {
+                    const payload = this.encodeActionData(JSON.stringify({ notificationId: n.id, absenceId: n.absenceId }));
+                    return `
+                        <div class="request-actions" style="margin-top: 8px; flex-direction: row;">
+                            <button class="btn btn-success btn-small" onclick="App.approveAbsenceRequest('${payload}')">Genehmigen</button>
+                            <button class="btn btn-danger btn-small" onclick="App.denyAbsenceRequest('${payload}')">Ablehnen</button>
+                        </div>
+                    `;
+                })() : '';
+
+                if (!actions && n.weekKey) {
+                    const context = this.encodeActionData(JSON.stringify({ notificationId: n.id, weekKey: n.weekKey }));
+                    actions = `
+                        <div class="request-actions" style="margin-top: 8px; flex-direction: row;">
+                            <button class="btn btn-primary btn-small" onclick="App.openNotificationPlan('${context}')">Im Plan öffnen</button>
+                        </div>
+                    `;
+                } else if (!actions && ['absence_notice', 'absence_cancelled'].includes(n.type)) {
+                    const context = this.encodeActionData(JSON.stringify({ notificationId: n.id }));
+                    actions = `
+                        <div class="request-actions" style="margin-top: 8px; flex-direction: row;">
+                            <button class="btn btn-primary btn-small" onclick="App.openNotificationAbsences('${context}')">Abwesenheit prüfen</button>
+                        </div>
+                    `;
+                }
+
+                return `
+                    <div class="notification-item ${['early', 'late', 'shift_request_response', 'absence_request', 'absence_notice', 'absence_cancelled'].includes(n.type) ? n.type : 'info'}">
+                        <span class="notification-icon">${icon}</span>
+                        <div class="notification-content">
+                            <div class="notification-title">${titleName}${this.escapeHtml(n.message || '')}${n.storeId ? ` · ${this.escapeHtml(DataManager.getStoreName(n.storeId))}` : ''}</div>
+                            ${n.reason ? `<div class="notification-reason">${n.type === 'shift_request_response' ? 'Info' : 'Grund'}: ${this.escapeHtml(n.reason)}</div>` : ''}
+                            <div class="notification-time">${this.formatTimestamp(n.timestamp)}</div>
+                            ${actions}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        } else {
+            badge.style.display = 'none';
+            card.style.display = 'none';
+        }
+    },
+
+    // ===========================
+    // Admin Tabs
+    // ===========================
+    handleAdminTab(tab) {
+        const tabName = tab.dataset.tab;
+        
+        // Update tab active state
         document.querySelectorAll('.tab-btn').forEach(t => t.classList.remove('active'));
         tab.classList.add('active');
         
