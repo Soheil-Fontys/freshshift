@@ -20,6 +20,54 @@ $$;
 revoke all on function private.set_updated_at() from public, anon, authenticated;
 grant execute on function private.set_updated_at() to service_role;
 
+create table if not exists public.activity_log (
+  id bigint generated always as identity primary key,
+  actor_profile_id uuid references public.profiles(id) on delete set null,
+  actor_name text not null,
+  store_id text references public.stores(id) on delete set null,
+  week_key text check (week_key is null or week_key ~ '^[0-9]{4}-W[0-9]{2}$'),
+  action text not null,
+  details jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  check (jsonb_typeof(details) = 'object')
+);
+create index if not exists activity_log_created_idx on public.activity_log (created_at desc);
+create index if not exists activity_log_store_week_idx
+  on public.activity_log (store_id, week_key, created_at desc);
+alter table public.activity_log enable row level security;
+drop policy if exists activity_log_admin_select on public.activity_log;
+create policy activity_log_admin_select on public.activity_log
+  for select to authenticated using (public.is_admin());
+revoke all on table public.activity_log from public, anon;
+grant select on table public.activity_log to authenticated, service_role;
+grant usage, select on sequence public.activity_log_id_seq to service_role;
+
+create or replace function private.record_activity(
+  p_action text,
+  p_store_id text default null,
+  p_week_key text default null,
+  p_details jsonb default '{}'::jsonb
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  actor_id uuid := (select auth.uid());
+  actor_label text;
+begin
+  if actor_id is null then return; end if;
+  select coalesce(nullif(p.display_name, ''), nullif(p.email, ''), 'Benutzer')
+  into actor_label from public.profiles p where p.id = actor_id;
+  insert into public.activity_log (actor_profile_id, actor_name, store_id, week_key, action, details)
+  values (actor_id, coalesce(actor_label, 'Benutzer'), p_store_id, p_week_key, p_action, coalesce(p_details, '{}'::jsonb));
+end;
+$$;
+revoke all on function private.record_activity(text, text, text, jsonb)
+  from public, anon, authenticated;
+grant execute on function private.record_activity(text, text, text, jsonb) to service_role;
+
 -- Contact and planning limits are kept on the employee record. An admin may
 -- enter a phone number, but only the employee can opt in to SMS from their own
 -- signed-in account.
