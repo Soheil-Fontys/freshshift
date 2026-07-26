@@ -1,5 +1,25 @@
 begin;
 
+-- Older FreshShift databases were created before the private helper schema
+-- was added to migrations. Keep this release compatible without exposing the
+-- trigger helper through the Data API.
+create schema if not exists private;
+revoke all on schema private from public, anon, authenticated;
+
+create or replace function private.set_updated_at()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+revoke all on function private.set_updated_at() from public, anon, authenticated;
+grant execute on function private.set_updated_at() to service_role;
+
 -- Contact and planning limits are kept on the employee record. An admin may
 -- enter a phone number, but only the employee can opt in to SMS from their own
 -- signed-in account.
