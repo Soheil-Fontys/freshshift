@@ -29,7 +29,7 @@ test('login screen only exposes invited-email authentication', () => {
     assert.doesNotMatch(html, /id="employee-select"/);
     assert.match(html, /id="loading-screen" class="screen active"/);
     assert.doesNotMatch(html, /id="login-screen" class="screen active"/);
-    assert.match(serviceWorker, /freshshift-v18/);
+    assert.match(serviceWorker, /freshshift-v19/);
     assert.match(serviceWorker, /Failed to cache:[\s\S]*throw error/);
     assert.match(serviceWorker, /fetch\(event\.request\)[\s\S]*caches\.match\(event\.request\)/);
     assert.match(html, /addEventListener\("controllerchange"/);
@@ -601,4 +601,29 @@ test('production hardening preserves history and separates save from release', (
     assert.match(app, /createWeeklySchedulePdf/);
     assert.match(app, /resetAvailability/);
     assert.match(app, /openUpdateEmployeeEmail/);
+});
+
+test('admin work-time tracking keeps overtime records admin-only and auditable', () => {
+    const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+    const app = fs.readFileSync(path.join(root, 'js/app.js'), 'utf8');
+    const cloud = fs.readFileSync(path.join(root, 'js/cloud-data.js'), 'utf8');
+    const migration = fs.readFileSync(
+        path.join(root, 'supabase/migrations/20260726223000_work_time_and_overtime.sql'),
+        'utf8'
+    );
+
+    assert.match(html, /data-page="admin-work-hours"/);
+    assert.match(html, /id="page-admin-work-hours"/);
+    assert.match(app, /renderAdminWorkHours/);
+    assert.match(app, /saveWorkTimeEntry/);
+    assert.match(app, /Ausgezahlt/);
+    assert.match(app, /Freizeitausgleich/);
+    assert.match(cloud, /getWorkTimeSettlements/);
+    assert.match(cloud, /saveWorkTimeSettlement/);
+    assert.match(migration, /create table if not exists public\.work_time_settlements/);
+    assert.match(migration, /status in \('open', 'paid', 'time_off', 'corrected'\)/);
+    assert.match(migration, /create policy "Admins manage work time settlements"/);
+    assert.match(migration, /not public\.is_admin\(\)/);
+    assert.match(migration, /create or replace function public\.save_work_time_entry/);
+    assert.match(migration, /create or replace function public\.save_work_time_settlement/);
 });

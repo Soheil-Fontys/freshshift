@@ -668,6 +668,11 @@
               </button>
             </li>
             <li>
+              <button class="menu-item" data-page="admin-work-hours">
+                Arbeitszeiten
+              </button>
+            </li>
+            <li>
               <button class="menu-item" data-page="admin-employees">
                 Mitarbeiter
               </button>
@@ -923,6 +928,21 @@
                 </table>
               </div>
             </div>
+          </div>
+
+          <!-- Work time and overtime page (admins only) -->
+          <div id="page-admin-work-hours" class="page-content">
+            <div class="page-header">
+              <h3>Arbeitszeiten &amp; Überstunden</h3>
+              <p class="helper-text">Geplante und tatsächliche Zeiten pro Woche. Der Status dient der korrekten Abrechnung oder dem Freizeitausgleich.</p>
+            </div>
+            <div class="week-selector">
+              <button id="work-hours-prev-week" class="btn-icon" aria-label="Vorherige Woche">←</button>
+              <span id="work-hours-week-display">KW 1</span>
+              <button id="work-hours-next-week" class="btn-icon" aria-label="Nächste Woche">→</button>
+            </div>
+            <div id="work-hours-summary" class="work-hours-summary"></div>
+            <div id="work-hours-list" class="work-hours-list"></div>
           </div>
 
           <!-- Employees Page -->

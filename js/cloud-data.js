@@ -850,6 +850,45 @@
             return mapped;
         },
 
+        async getWorkTimeSettlements(weekKey, storeId) {
+            requireAdmin();
+            const rows = unwrap(await requireClient()
+                .from('work_time_settlements')
+                .select('employee_id,week_key,store_id,status,note,settled_at,settled_by')
+                .eq('week_key', weekKey)
+                .eq('store_id', storeId), 'Abrechnungsstatus konnte nicht geladen werden.') || [];
+            return rows.map(row => ({
+                employeeId: row.employee_id,
+                weekKey: row.week_key,
+                storeId: row.store_id,
+                status: row.status,
+                note: row.note || '',
+                settledAt: row.settled_at,
+                settledBy: row.settled_by
+            }));
+        },
+
+        async saveWorkTimeEntry(shiftId, actualStart, actualEnd) {
+            requireAdmin();
+            unwrap(await requireClient().rpc('save_work_time_entry', {
+                p_shift_id: shiftId,
+                p_actual_start: actualStart,
+                p_actual_end: actualEnd
+            }), 'Arbeitszeit konnte nicht gespeichert werden.');
+            await loadCloudData();
+        },
+
+        async saveWorkTimeSettlement(employeeId, weekKey, storeId, status, note) {
+            requireAdmin();
+            unwrap(await requireClient().rpc('save_work_time_settlement', {
+                p_employee_id: employeeId,
+                p_week_key: weekKey,
+                p_store_id: storeId,
+                p_status: status,
+                p_note: note || null
+            }), 'Abrechnungsstatus konnte nicht gespeichert werden.');
+        },
+
         getAbsences() {
             return cache.absences;
         },
