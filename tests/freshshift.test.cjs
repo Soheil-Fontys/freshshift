@@ -29,7 +29,7 @@ test('login screen only exposes invited-email authentication', () => {
     assert.doesNotMatch(html, /id="employee-select"/);
     assert.match(html, /id="loading-screen" class="screen active"/);
     assert.doesNotMatch(html, /id="login-screen" class="screen active"/);
-    assert.match(serviceWorker, /freshshift-v19/);
+    assert.match(serviceWorker, /freshshift-v20/);
     assert.match(serviceWorker, /Failed to cache:[\s\S]*throw error/);
     assert.match(serviceWorker, /fetch\(event\.request\)[\s\S]*caches\.match\(event\.request\)/);
     assert.match(html, /addEventListener\("controllerchange"/);
@@ -390,6 +390,37 @@ test('release validation blocks invalid and unresolved shifts', () => {
     vm.runInContext(`scheduleForTest.shifts.monday[0].end = '10:00'`, context);
     const invalidTime = vm.runInContext(`App.validateScheduleForRelease(scheduleForTest, 'fresh_fries')`, context);
     assert.match(invalidTime.errors.join(' '), /ungültige Zeiten/);
+});
+
+test('release validation allows the same employee to support both stores at the same time', () => {
+    const context = vm.createContext({
+        console,
+        document: { addEventListener: () => {} },
+        window: {},
+        localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} }
+    });
+    vm.runInContext(fs.readFileSync(path.join(root, 'js/data.js'), 'utf8'), context);
+    vm.runInContext(fs.readFileSync(path.join(root, 'js/app.js'), 'utf8'), context);
+    vm.runInContext(`
+        DataManager.getEmployee = () => ({ id: 'employee-1', name: 'Test', active: true });
+        DataManager.getEmployeeAbsenceForDate = () => null;
+        DataManager.getEmployeeAvailability = () => ({
+            days: { monday: { available: true, start: '08:00', end: '20:00' } }
+        });
+        DataManager.getSchedules = () => ([{
+            storeId: 'yes_fresh',
+            weekKey: DateUtils.getWeekKey(App.currentWeek),
+            shifts: { monday: [{ employeeId: 'employee-1', start: '10:00', end: '18:00', requestStatus: 'accepted' }] }
+        }]);
+        scheduleForTest = {
+            storeId: 'fresh_fries',
+            weekKey: DateUtils.getWeekKey(App.currentWeek),
+            shifts: { monday: [{ employeeId: 'employee-1', start: '10:00', end: '18:00', requestStatus: 'accepted' }] }
+        };
+    `, context);
+
+    const validation = vm.runInContext(`App.validateScheduleForRelease(scheduleForTest, 'fresh_fries')`, context);
+    assert.deepEqual(Array.from(validation.errors), []);
 });
 
 test('planning and notification release is wired end to end', () => {

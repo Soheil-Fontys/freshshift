@@ -6,7 +6,7 @@ Shift planning for Yes Fresh and Fresh Fries. Employees submit their weekly avai
 
 - **Employee Self-Service**: Employees can submit their weekly availability (Mon-Sat) with specific time slots
 - **Manual Schedule Planning**: Admins can prepare and release weekly schedules
-- **Release Safeguards**: Invalid times, absences, overlapping assignments, and unanswered shift requests are checked before release
+- **Release Safeguards**: Invalid times, absences, and unanswered shift requests are checked before release. Employees may be assigned to both stores at the same time when they are scheduled to help across locations.
 - **Admin Dashboard**: Review submitted availability, absences, requests, and schedules
 - **Personal Schedule View**: Each employee can view their assigned shifts after release
 - **Employee Lifecycle**: Archive former employees without losing historic schedules or monthly totals
