@@ -1033,12 +1033,6 @@ const App = {
         return { start: startMinutes, end: endMinutes };
     },
 
-    timeRangesOverlap(first, second) {
-        if (!first || !second) return false;
-        const variants = [second, { start: second.start + 1440, end: second.end + 1440 }];
-        return variants.some(candidate => first.start < candidate.end && candidate.start < first.end);
-    },
-
     isShiftWithinAvailability(start, end, availability) {
         if (!availability?.available) return false;
         const shiftRange = this.timeRange(start, end);
@@ -1086,17 +1080,6 @@ const App = {
                     }
                 }
 
-                DataManager.getSchedules()
-                    .filter(other => other.weekKey === weekKey && other.storeId !== storeId)
-                    .forEach(other => {
-                        (other.shifts?.[dayKey] || [])
-                            .filter(otherShift => otherShift.employeeId === shift.employeeId && otherShift.requestStatus !== 'declined')
-                            .forEach(otherShift => {
-                                if (this.timeRangesOverlap(shiftRange, this.timeRange(otherShift.start, otherShift.end))) {
-                                    errors.push(`${name} ist am ${DateUtils.DAYS_SHORT[dayIndex]} gleichzeitig bei ${DataManager.getStoreName(other.storeId)} eingeplant.`);
-                                }
-                            });
-                    });
             });
         });
 
